@@ -34,7 +34,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          ./venv/bin/pip install --upgrade tomli
+          ./venv/bin/pip install --upgrade simplifiedapp tomli
 
       - name: Get Python Package Version
         id: get_package_version
@@ -101,16 +101,15 @@ jobs:
 
       - name: Install Build Modules
         run: |
-          ./venv/bin/pip install --upgrade wheel setuptools
+          ./venv/bin/pip install --upgrade build
 
       - name: Install Dependencies
         run: |
-          ./venv/bin/pip install --upgrade tomli
+          ./venv/bin/pip install --upgrade simplifiedapp tomli
 
       - name: Build Package
         run: |
-          ./venv/bin/python3 setup.py sdist
-          ./venv/bin/python3 setup.py bdist_wheel
+          ./venv/bin/python3 -m build
 
       - name: Create Github Release
         id: create_release
