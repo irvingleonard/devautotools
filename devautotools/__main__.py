@@ -5,8 +5,11 @@ Several tools to automate development related tasks.
 This is the executable script
 """
 
-import simplifiedapp
+from simplifiedapp import main
 
-from . import *
+try:
+	import devautotools
+except ModuleNotFoundError:
+	import __init__ as devautotools
 
-simplifiedapp.main()
+main(devautotools)
