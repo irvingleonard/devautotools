@@ -13,7 +13,7 @@ from webbrowser import open as webbrowser_open
 
 from tomli import load as tomli_load
 
-__version__ = '0.1.0'
+__version__ = '0.0.10'
 
 LOGGER = getLogger(__name__)
 
