@@ -16,7 +16,7 @@ from webbrowser import open as webbrowser_open
 from pip._vendor.packaging.tags import sys_tags
 from tomli import load as tomli_load
 
-__version__ = '0.1.1'
+__version__ = '0.1.2.dev0'
 
 LOGGER = getLogger(__name__)
 
@@ -40,8 +40,10 @@ class VirtualEnvironmentManager:
 		"""
 		
 		program_path = self.bin_scripts / program
+		if os_name == 'nt':
+			program_path = program_path.with_suffix('.exe')
 		if not program_path.exists():
-			raise ValueError('Unsupported program: {}'.format(program))
+			raise ValueError('Unsupported program: {}'.format(program_path))
 		result = run((str(program_path),) + tuple(arguments), capture_output=True, cwd=cwd, check=False, text=True, env=env)
 		if self._show_output:
 			if result.stderr:
@@ -65,7 +67,7 @@ class VirtualEnvironmentManager:
 		
 		self.__setattr__(name, value)
 		return value
-	
+		
 	def __init__(self, path='./venv', overwrite=False, show_output=True, system_site_packages=False):
 		"""Magic initialization
 		Initial environment creation, re-creation, or just assume it's there.
