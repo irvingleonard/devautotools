@@ -9,14 +9,15 @@ from os import environ, name as os_name
 from pathlib import Path
 from re import match as re_match
 from shutil import rmtree
-from subprocess import run
+from subprocess import PIPE, STDOUT, run
 from sys import executable, stderr
+from tempfile import mkdtemp
 from webbrowser import open as webbrowser_open
 
 from pip._vendor.packaging.tags import sys_tags
 from tomli import load as tomli_load
 
-__version__ = '0.1.2.dev0'
+__version__ = '0.1.2.dev1'
 
 LOGGER = getLogger(__name__)
 
@@ -44,14 +45,20 @@ class VirtualEnvironmentManager:
 			program_path = program_path.with_suffix('.exe')
 		if not program_path.exists():
 			raise ValueError('Unsupported program: {}'.format(program_path))
-		result = run((str(program_path),) + tuple(arguments), capture_output=True, cwd=cwd, check=False, text=True, env=env)
+		result = run((str(program_path),) + tuple(arguments), stderr=STDOUT, stdout=PIPE, cwd=cwd, check=False, text=True, env=env)
 		if self._show_output:
-			if result.stderr:
-				print(result.stderr)
 			if result.stdout:
 				print(result.stdout)
 		result.check_returncode()
 		return result
+	
+	def __del__(self):
+		"""Magic cleanup
+		Using non-automanaged temporary folder, which will get cleanup here.
+		"""
+		
+		if self._is_temp:
+			rmtree(self.path.parent)
 	
 	def __getattr__(self, name):
 		"""Magic attribute resolution
@@ -73,7 +80,12 @@ class VirtualEnvironmentManager:
 		Initial environment creation, re-creation, or just assume it's there.
 		"""
 		
-		self.path = Path(path).absolute()
+		if path is None:
+			self.path = (Path(mkdtemp()) / 'venv').absolute()
+			self._is_temp = True
+		else:
+			self.path = Path(path).absolute()
+			self._is_temp = False
 		self._show_output = show_output
 		
 		#Storing for __repr__
@@ -100,7 +112,10 @@ class VirtualEnvironmentManager:
 		An evaluable python expression describing the current virtual environment
 		"""
 		
-		parameters = ['path=' + repr(str(self.path))]
+		if self._is_temp:
+			parameters = ['path=None']
+		else:
+			parameters = ['path=' + repr(str(self.path))]
 		if hasattr(self, '_overwrite'):
 			parameters.append('overwrite=' + repr(self._overwrite))
 		if not self._show_output:
