@@ -3,6 +3,7 @@
 Several tools to automate development related tasks.
 """
 
+from atexit import register as atexit_register
 from json import loads as json_loads
 from logging import getLogger
 from os import environ, name as os_name
@@ -17,7 +18,7 @@ from webbrowser import open as webbrowser_open
 from pip._vendor.packaging.tags import sys_tags
 from tomli import load as tomli_load
 
-__version__ = '0.1.2.dev2'
+__version__ = '0.1.2.dev3'
 
 LOGGER = getLogger(__name__)
 
@@ -52,17 +53,6 @@ class VirtualEnvironmentManager:
 		result.check_returncode()
 		return result
 	
-	def __del__(self):
-		"""Magic cleanup
-		Using non-automanaged temporary folder, which will get cleanup here.
-		"""
-		
-		try:
-			if self._is_temp:
-				rmtree(self.path.parent)
-		except Exception as err_:
-			LOGGER.debug("Couldn't cleanup an instance of <{}> because: {}".format(type(self), err_))
-	
 	def __enter__(self):
 		"""Context manager initialization
 		Magic method used to initialize the context manager
@@ -76,7 +66,6 @@ class VirtualEnvironmentManager:
 		"""
 		
 		LOGGER.debug('Ignoring exception in context: %s(%s) | %s', exc_type, exc_val, exc_tb)
-		self.__del__()
 	
 	def __getattr__(self, name):
 		"""Magic attribute resolution
@@ -122,6 +111,8 @@ class VirtualEnvironmentManager:
 			venv_extra_params.append('--system-site-packages')
 		
 		if not self.path.exists():
+			if self._is_temp:
+				atexit_register(rmtree, self.path.parent, ignore_errors=True)
 			run((executable, '-m', 'venv', str(self.path), *venv_extra_params), capture_output=not self._show_output, check=True)
 			self('-m', 'pip', 'install', '--upgrade', 'pip')
 	
