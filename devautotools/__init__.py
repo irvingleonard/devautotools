@@ -57,8 +57,26 @@ class VirtualEnvironmentManager:
 		Using non-automanaged temporary folder, which will get cleanup here.
 		"""
 		
-		if self._is_temp:
-			rmtree(self.path.parent)
+		try:
+			if self._is_temp:
+				rmtree(self.path.parent)
+		except Exception as err_:
+			LOGGER.debug("Couldn't cleanup an instance of <{}> because: {}".format(type(self), err_))
+	
+	def __enter__(self):
+		"""Context manager initialization
+		Magic method used to initialize the context manager
+		"""
+		
+		return self
+	
+	def __exit__(self, exc_type, exc_val, exc_tb):
+		"""Context manager termination
+		Magic method used to terminate the context manager
+		"""
+		
+		LOGGER.debug('Ignoring exception in context: %s(%s) | %s', exc_type, exc_val, exc_tb)
+		self.__del__()
 	
 	def __getattr__(self, name):
 		"""Magic attribute resolution
