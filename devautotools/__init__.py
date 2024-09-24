@@ -17,7 +17,7 @@ from webbrowser import open as webbrowser_open
 from pip._vendor.packaging.tags import sys_tags
 from tomli import load as tomli_load
 
-__version__ = '0.1.2.dev1'
+__version__ = '0.1.2.dev2'
 
 LOGGER = getLogger(__name__)
 
