@@ -142,7 +142,7 @@ class VirtualEnvironmentManager:
 		if not self.path.exists():
 			if self._is_temp:
 				atexit_register(rmtree, self.path.parent, ignore_errors=True)
-			run((executable, '-m', 'venv', str(self.path), *venv_extra_params), stdout=PIPE, stderr=STDOUT, capture_output=True, check=True)
+			run((executable, '-m', 'venv', str(self.path), *venv_extra_params), capture_output=True, check=True, text=True)
 			self('-m', 'pip', 'install', '--upgrade', 'pip')
 	
 	def __repr__(self):

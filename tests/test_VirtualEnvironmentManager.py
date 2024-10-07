@@ -23,7 +23,7 @@ class VirtualEnvironmentManagerTest(TestCase):
         Setup the virtual environment on a local directory
         """
         
-        cls.venv = VirtualEnvironmentManager(path=cls.VENV_DIRECTORY_NAME, show_output=False)
+        cls.venv = VirtualEnvironmentManager(path=cls.VENV_DIRECTORY_NAME)
     
     @classmethod
     def tearDownClass(cls):
@@ -32,12 +32,13 @@ class VirtualEnvironmentManagerTest(TestCase):
         """
         
         rmtree(Path.cwd() / cls.VENV_DIRECTORY_NAME)
+        
     def test_python_version(self):
         """
         Test that we got a working python binary available
         """
         
-        self.assertEqual('Python {}.{}.{}\n'.format(*version_info[:3]), self.venv('--version').stdout)
+        self.assertEqual('Python {}.{}.{}\n'.format(*version_info[:3]), self.venv('--version', capture_output=True).stdout)
 
 
 class TempVirtualEnvironmentManagerTest(TestCase):
@@ -51,11 +52,11 @@ class TempVirtualEnvironmentManagerTest(TestCase):
         Setup the virtual environment on a local directory
         """
         
-        cls.venv = VirtualEnvironmentManager(path=None, show_output=False)
+        cls.venv = VirtualEnvironmentManager(path=None)
     
     def test_python_version(self):
         """
         Test that we got a working python binary available
         """
         
-        self.assertEqual('Python {}.{}.{}\n'.format(*version_info[:3]), self.venv('--version').stdout)
+        self.assertEqual('Python {}.{}.{}\n'.format(*version_info[:3]), self.venv('--version', capture_output=True).stdout)
