@@ -14,18 +14,14 @@ from webbrowser import open as webbrowser_open
 
 from ._venv import deploy_local_venv
 
-LOGGER = getLogger(__name__)
-
-
 DEFAULT_EXTRA_ENV_VARIABLES = {
 	'DJANGO_DEBUG': 'true',
 	'DJANGO_LOG_LEVEL': 'debug',
 	'PORT': '8080',
 }
+LOGGER = getLogger(__name__)
 
-def deploy_local_django_site(*secret_json_files_paths, system_site_packages=False, django_site_name='test_site',
-							 extra_files_to_link='', extra_subdirs='', create_cache_table=False, superuser_password='',
-							 just_build=False):
+def deploy_local_django_site(*secret_json_files_paths, system_site_packages=False, django_site_name='test_site', extra_files_to_link='', extra_subdirs='', create_cache_table=False, superuser_password='', just_build=False):
 	"""Deploy a local Django site
 	Starts by deploying a new virtual environment via "deploy_local_env()" and then creates a test site with symlinks to the existing project files. It runs the test server until it gets stopped (usually with ctrl + c).
 	"""
@@ -105,8 +101,7 @@ def deploy_local_django_site(*secret_json_files_paths, system_site_packages=Fals
 		'',
 		'You can run this again with:',
 		'',
-		'env DJANGO_DEBUG=true `./venv/bin/python -m env_pipes vars_from_file --uppercase_vars {secret_files}` ./venv/bin/python ./test_site/manage.py runserver --settings=test_site.local_settings'.format
-			(secret_files=' '.join([str(s) for s in secret_json_files_paths])),
+		'env DJANGO_DEBUG=true `./venv/bin/python -m env_pipes vars_from_file --uppercase_vars {secret_files}` ./venv/bin/python ./test_site/manage.py runserver --settings=test_site.local_settings'.format(secret_files=' '.join([str(s) for s in secret_json_files_paths])),
 		'',
 	]
 	
