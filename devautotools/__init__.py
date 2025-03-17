@@ -13,7 +13,7 @@ from ._django import deploy_local_django_site
 from ._venv import deploy_local_venv
 from ._venvctrl import VirtualEnvironmentManager
 
-__version__ = '0.1.2.dev4'
+__version__ = '0.1.2.dev5'
 
 LOGGER = getLogger(__name__)
 
