@@ -30,12 +30,7 @@ jobs:
 
       - name: Create Virtual Environment & Upgrade PIP
         run: |
-          python3 -m venv venv
-          ./venv/bin/pip install --upgrade pip
-
-      - name: Install Dependencies
-        run: |
-          ./venv/bin/pip install --upgrade simplifiedapp tomli
+          python3 deploy.py
 
       - name: Install Test Coverage Python Modules
         run: |
@@ -44,7 +39,7 @@ jobs:
       - name: Get Python Package Version
         id: get_package_version
         run: |
-          echo "PACKAGE_VERSION=v"`./venv/bin/python3 -m ${{ vars.PACKAGE_NAME}} --version` >> $GITHUB_OUTPUT
+          echo "PACKAGE_VERSION=v"`./venv/bin/python -m ${{ vars.PACKAGE_NAME}} --version` >> $GITHUB_OUTPUT
           cat $GITHUB_OUTPUT
 
       - name: Check if Version is Valid
@@ -52,9 +47,9 @@ jobs:
         run: |
           if [[ ! ${{ steps.get_package_version.outputs.PACKAGE_VERSION }} =~ ${{env.ALL_VALID_TAGS_REGEX}} ]]; then
             echo "INVALID_TAG=True" >> $GITHUB_OUTPUT
-            echo "Version found: ${{ steps.get_package_version.outputs.PACKAGE_VERSION }} is not a valid semver version number";
+            echo "Version found: ${{ steps.get_package_version.outputs.PACKAGE_VERSION }} is not a valid semantic version number";
           else 
-            echo "Version found: ${{ steps.get_package_version.outputs.PACKAGE_VERSION }} is a valid semver version number"
+            echo "Version found: ${{ steps.get_package_version.outputs.PACKAGE_VERSION }} is a valid semantic version number"
           fi
 
       - name: Set Failure Status for Invalid Version
