@@ -15,11 +15,11 @@ from ._docker import start_local_docker_container, stop_local_docker_container
 from ._venv import deploy_local_venv
 from ._venvctrl import VirtualEnvironmentManager
 
-__version__ = '0.1.2.dev6'
+__version__ = '0.1.2.dev7'
 
 LOGGER = getLogger(__name__)
 
-def env_vars_from_ini(*input_files, sep=' '):
+def env_vars_from_ini(*input_files, sep=' ', uppercase_vars=False):
 	"""Env variables from INI files
 	Parses INI files containing the variables and prints a line, ready to be fed to "env".
 	"""
@@ -39,11 +39,13 @@ def env_vars_from_ini(*input_files, sep=' '):
 		for section, content in config.items():
 			LOGGER.debug('Adding settings from section %s', section)
 			for key, value in content.items():
+				if uppercase_vars:
+					key = key.upper()
 				result[key] = shlex_quote(str(value))
 
 	return sep.join(['='.join((key, value)) for key, value in result.items()])
 
-def env_vars_from_json(*input_files, sep=' '):
+def env_vars_from_json(*input_files, sep=' ', uppercase_vars=False):
 	"""Env variables from JSON files
 	Parses JSON files containing the variables and prints a line, ready to be fed to "env".
 	"""
@@ -61,6 +63,8 @@ def env_vars_from_json(*input_files, sep=' '):
 		for key, value in content.items():
 			if isinstance(value, (list, dict)):
 				value = json_dumps(value)
+			if uppercase_vars:
+				key = key.upper()
 			result[key] = shlex_quote(str(value))
 
 	return sep.join(['='.join((key, value)) for key, value in result.items()])
