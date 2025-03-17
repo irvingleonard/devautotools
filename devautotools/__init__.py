@@ -4,6 +4,7 @@ Several tools to automate development related tasks.
 """
 
 from base64 import b64decode, b64encode
+from configparser import ConfigParser
 from json import dumps as json_dumps, load as json_load, loads as json_loads
 from logging import getLogger
 from pathlib import Path
@@ -18,9 +19,33 @@ __version__ = '0.1.2.dev6'
 
 LOGGER = getLogger(__name__)
 
+def env_vars_from_ini(*input_files, sep=' '):
+	"""Env variables from INI files
+	Parses INI files containing the variables and prints a line, ready to be fed to "env".
+	"""
+
+	result = {}
+
+	for input_file in input_files:
+		input_file = Path(input_file)
+		if input_file.is_file():
+			LOGGER.debug('Working with file: %s', input_file)
+		else:
+			LOGGER.error('Unable to access file: %s', input_file)
+
+		config = ConfigParser()
+		config.optionxform = str
+		config.read_file(input_file.open())
+		for section, content in config.items():
+			LOGGER.debug('Adding settings from section %s', section)
+			for key, value in content.items():
+				result[key] = shlex_quote(str(value))
+
+	return sep.join(['='.join((key, value)) for key, value in result.items()])
+
 def env_vars_from_json(*input_files, sep=' '):
-	"""Env variables from JSON file
-	Parses a JSON file containing the variables and prints a line, ready to be fed to "env".
+	"""Env variables from JSON files
+	Parses JSON files containing the variables and prints a line, ready to be fed to "env".
 	"""
 
 	result = {}
