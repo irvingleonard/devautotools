@@ -3,67 +3,148 @@
 Several tools to automate development related tasks.
 """
 
-from json import loads as json_loads
+from base64 import b64decode, b64encode
+from json import dumps as json_dumps, load as json_load, loads as json_loads
 from logging import getLogger
-from os import environ
 from pathlib import Path
-from subprocess import run
+from shlex import quote as shlex_quote
 
 from ._django import deploy_local_django_site
+from ._docker import start_local_docker_container, stop_local_docker_container
 from ._venv import deploy_local_venv
 from ._venvctrl import VirtualEnvironmentManager
 
-__version__ = '0.1.2.dev5'
+__version__ = '0.1.2.dev6'
 
 LOGGER = getLogger(__name__)
 
-def start_local_docker_container(*secret_json_files_paths, extra_env_variables=None, platform=None, build_only=False):
-	"""Start local Docker container
-	Build and run a container based on the Dockerfile on the current working directory.
+def env_vars_from_json(*input_files, sep=' '):
+	"""Env variables from JSON file
+	Parses a JSON file containing the variables and prints a line, ready to be fed to "env".
 	"""
-	
-	secret_json_files_paths = [Path(json_file_path) for json_file_path in secret_json_files_paths]
-	for json_file_path in secret_json_files_paths:
-		if not json_file_path.is_file():
-			raise RuntimeError(
-				'The provided file does not exists or is not accessible by you: {}'.format(json_file_path))
-	
-	environment_content = DEFAULT_EXTRA_ENV_VARIABLES.copy() if extra_env_variables is None else dict(extra_env_variables)
-	
-	for json_file_path in secret_json_files_paths:
-		environment_content.update({key.upper(): value for key, value in json_loads(json_file_path.read_text()).items()})
-	
-	build_command = ['docker', 'build']
-	if platform is not None:
-		build_command += ['--platform', platform]
-	for var_name in environment_content:
-		build_command += ['--build-arg', var_name]
-	
-	current_directory = Path.cwd()
-	
-	LOGGER.debug('Environment populated: %s', environment_content)
-	build_command += ['--tag', '{}:latest'.format(current_directory.name), str(current_directory)]
-	LOGGER.debug('Running build command: %s', build_command)
-	build_run = run(build_command, env=environ | environment_content)
-	build_run.check_returncode()
-	
-	if not build_only:
-		
-		run_command = ['docker', 'run', '-d', '--rm', '--name', '{}_test'.format(current_directory.name)]
-		for var_name in environment_content:
-			run_command += ['-e', var_name]
-		run_command += ['-p', '127.0.0.1:{PORT}:{PORT}'.format(PORT=environment_content['PORT']), '{}:latest'.format(current_directory.name)]
-		
-		run_run = run(run_command, env=environ | environment_content)
-		run_run.check_returncode()
-		
-		return run(('docker', 'logs', '-f', '{}_test'.format(current_directory.name)))
+
+	result = {}
+
+	for input_file in input_files:
+		input_file = Path(input_file)
+		if input_file.is_file():
+			LOGGER.debug('Working with file: %s', input_file)
+		else:
+			LOGGER.error('Unable to access file: %s', input_file)
+
+		content = json_load(input_file.open())
+		for key, value in content.items():
+			if isinstance(value, (list, dict)):
+				value = json_dumps(value)
+			result[key] = shlex_quote(str(value))
+
+	return sep.join(['='.join((key, value)) for key, value in result.items()])
 
 
-def stop_local_docker_container():
-	"""Stop local Docker container
-	Stop a container started with "start_local_docker_container" on the current local directory.
-	"""
-	
-	return run(('docker', 'stop', '{}_test'.format(Path.cwd().name)))
+def _pack_path(path_to_pack):
+	'''Packs a path recursively
+	Returns the file content encoded or creates a directory entry (a dict) and calls itself for each child.
+	'''
 
+	if path_to_pack.is_dir():
+		result = {child_path.name : _pack_path(child_path) for child_path in path_to_pack.iterdir()}
+	elif path_to_pack.is_file():
+		result = b64encode(path_to_pack.read_bytes()).decode('utf-8')
+	else:
+		raise ValueError('Not a packable path: {}'.format(path_to_pack))
+
+	return result
+
+def _unpack_path(tree_node, parent_path, overwrite_files = False):
+	'''Unpacks a path recursively
+	Writes the content of the encoded file or creates a directory and calls itself for each child.
+	'''
+
+	parent_path = Path(parent_path)
+	if not isinstance(tree_node, dict):
+		raise ValueError('Malformed path pack')
+
+	result = []
+	for name, content in tree_node.items():
+		content_path = parent_path / name
+		if isinstance(content, str):
+			if content_path.exists() and not overwrite_files:
+				raise FileExistsError(str(content_path))
+			else:
+				content_path.write_bytes(b64decode(content))
+				result.append(content_path)
+		elif isinstance(content, dict):
+			content_path.mkdir(exist_ok = True)
+			result.append(content_path)
+			result += _unpack_path(content, content_path, overwrite_files)
+		else:
+			raise ValueError('Malformed path pack')
+
+	return result
+
+
+class EnvironmentalPipes:
+	'''Pipe data via environmental variables
+	Several utility tools to handle complex data structures as environmental variables.
+	'''
+
+	@staticmethod
+	def pack_path(*paths_to_pack, base64_result = False, quote_result = False):
+		'''Content in paths as JSON
+		Packs the content from the paths provided into a JSON object.
+		'''
+
+		result = {}
+		for path_to_pack in paths_to_pack:
+			target_path = Path(path_to_pack)
+			if target_path.exists():
+				LOGGER.debug('Working with path: %s', target_path)
+			else:
+				raise ValueError("The path does not exists or you can't access it: {}".format(target_path))
+
+			result[target_path.name] = _pack_path(target_path)
+
+		result = json_dumps(result)
+		if base64_result:
+			result = b64encode(result.encode('utf-8')).decode('utf-8')
+		if quote_result:
+			result = shlex_quote(result)
+
+		return result
+
+	@staticmethod
+	def unpack_path(destination, content_file, create_destination = False, overwrite_files = False, base64_decode = False):
+		'''Unpack JSON content into a directory
+		Unpacks a JSON object created with "pack_path" into a directory
+		'''
+
+		destination_path = Path(destination)
+		if destination_path.is_dir():
+			LOGGER.debug('Working with directory: %s', destination_path)
+		elif create_destination:
+			if destination_path.exists():
+				raise ValueError("Can't create directory on existing path: {}".format(destination_path))
+			else:
+				LOGGER.debug('Creating directory: %s', destination_path)
+				destination_path.mkdir(parents = True)
+		else:
+			raise ValueError('"{}" is not a directory that you can access'.format(destination))
+
+		if content_file == '-':
+			content = input()
+			if base64_decode:
+				content = b64decode(content.encode('utf-8')).decode('utf-8')
+		else:
+			content_file_path = Path(content_file)
+			try:
+				if base64_decode:
+					content = b64decode(content_file_path.read_bytes()).decode('utf-8')
+				else:
+					content = content_file_path.read_text()
+			except Exception as error:
+				raise RuntimeError('An error ocurred while reading the content file')
+
+		content = json_loads(content)
+		result = _unpack_path(content, destination_path, overwrite_files)
+
+		return result
