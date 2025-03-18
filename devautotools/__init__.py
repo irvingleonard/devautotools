@@ -15,7 +15,7 @@ from ._docker import start_local_docker_container, stop_local_docker_container
 from ._venv import deploy_local_venv
 from ._venvctrl import VirtualEnvironmentManager
 
-__version__ = '0.1.2.dev7'
+__version__ = '0.1.2.dev8'
 
 LOGGER = getLogger(__name__)
 
