@@ -29,14 +29,16 @@ def deploy_local_django_site(*secret_json_files_paths, system_site_packages=Fals
 	secret_json_files_paths = [Path(json_file_path) for json_file_path in secret_json_files_paths]
 	for json_file_path in secret_json_files_paths:
 		if not json_file_path.is_file():
-			raise RuntimeError(
-				'The provided file does not exists or is not accessible by you: {}'.format(json_file_path))
+			raise RuntimeError('The provided file does not exists or is not accessible by you: {}'.format(json_file_path))
 	
 	environment_content = {}
 	for json_file_path in secret_json_files_paths:
-		environment_content.update(
-			{key.upper(): value for key, value in json_loads(json_file_path.read_text()).items()})
-	
+		environment_content.update({key.upper(): value for key, value in json_loads(json_file_path.read_text()).items()})
+
+	django_linked_site = DjangoLinkedSite(django_site_name)
+	django_linked_site.start()
+	return
+
 	virtual_env, pyproject_toml = deploy_local_venv(system_site_packages=system_site_packages)
 	current_directory = Path.cwd()
 	base_dir = current_directory / django_site_name
@@ -147,24 +149,25 @@ class DjangoLinkedSite:
 		:returns Any: the value for the attribute
 		"""
 		
-		if (name == 'venv') or (name == 'project_toml'):
-			venv, project_toml = deploy_local_venv()
+		if (name == 'venv') or (name == 'pyproject_toml'):
+			venv, pyproject_toml = deploy_local_venv()
 			if name == 'venv':
 				value = venv
-				self.__setattr__('project_toml', project_toml)
+				self.__setattr__('pyproject_toml', pyproject_toml)
 			else:
-				value = project_toml
+				value = pyproject_toml
 				self.__setattr__('venv', venv)
 		elif name == 'base_dir':
 			value = self.parent_dir / self.site_name
+		elif name == 'site_dir':
+			value = self.base_dir / self.site_name
 		else:
 			raise AttributeError(name)
 		
 		self.__setattr__(name, value)
 		return value
 	
-	def __init__(self, site_name, project_dir=Path.cwd(), parent_dir=Path.cwd(),
-				 virtual_environment_project_toml=(None, None)):
+	def __init__(self, site_name, project_dir=Path.cwd(), parent_dir=Path.cwd(), virtual_environment_pyproject_toml=(None, None)):
 		"""
 		Magic initiation
 
@@ -175,10 +178,10 @@ class DjangoLinkedSite:
 		self.site_name = site_name
 		self.project_dir = Path(project_dir)
 		self.parent_dir = Path(parent_dir)
-		virtual_environment, project_toml = virtual_environment_project_toml
-		if (virtual_environment is not None) and (project_toml is not None):
+		virtual_environment, pyproject_toml = virtual_environment_pyproject_toml
+		if (virtual_environment is not None) and (pyproject_toml is not None):
 			self.venv = virtual_environment
-			self.project_toml = project_toml
+			self.pyproject_toml = pyproject_toml
 	
 	def _relative_to_project(self, path):
 		"""
@@ -187,30 +190,42 @@ class DjangoLinkedSite:
 		
 		path = Path(path)
 		if self.project_dir in path.parents:
-			return Path('.').joinpath('..' * (path.parents.index(self.project_dir) + 1)) / path.name
+			return Path('.').joinpath(*([Path('..')] * path.parents.index(self.project_dir))) / path.name
 		else:
 			return (self.project_dir / path.name).absolute
 	
-	def start(self, overwrite=True):
+	def start(self, overwrite=True, project_paths_to_site=''):
 		"""
 		Start the Django project
 		Runs the basic "django-admin startproject" and also links the related files
 		"""
 		
-		if overwrite and self.base_dir.exist():
+		if overwrite and self.base_dir.exists():
 			LOGGER.info('Deleting current site: %s', self.base_dir)
 			rmtree(self.base_dir)
+		elif self.base_dir.exists():
+			raise FileExistsError('The site is already present. Use the "overwrite" parameter to recreate it')
 		
 		LOGGER.info('Creating new site: %s', self.site_name)
 		self.venv('startproject', self.site_name, program='django-admin', cwd=self.parent_dir)
 		
-		if ('tool' in self.pyproject_toml) and ('setuptools' in self.pyproject_toml['tool']) and (
-				'packages' in self.pyproject_toml['tool']['setuptools']) and (
-				'find' in self.pyproject_toml['tool']['setuptools']['packages']) and (
-				'include' in self.pyproject_toml['tool']['setuptools']['packages']['find']):
+		if ('tool' in self.pyproject_toml) and ('setuptools' in self.pyproject_toml['tool']) and ('packages' in self.pyproject_toml['tool']['setuptools']) and ('find' in self.pyproject_toml['tool']['setuptools']['packages']) and ('include' in self.pyproject_toml['tool']['setuptools']['packages']['find']):
 			for pattern in self.pyproject_toml['tool']['setuptools']['packages']['find']['include']:
 				for resulting_path in self.project_dir.glob(pattern):
 					base_content = self.base_dir / resulting_path.name
 					content_from_base = self._relative_to_project(base_content)
 					LOGGER.info('Linking module content: %s -> %s', base_content, content_from_base)
 					base_content.symlink_to(content_from_base)
+
+		project_paths_to_site = project_paths_to_site.split(',')
+		project_to_site_map = self.DEFAULT_PROJECT_TO_SITE_MAP | dict(zip(project_paths_to_site, [None ] *len(project_paths_to_site)))
+		for project_path_name, site_path_name in project_to_site_map.items():
+			if (self.project_dir / project_path_name).exists():
+				site_path = self.site_dir / (project_path_name if site_path_name is None else site_path_name)
+				LOGGER.info('Cleaning site file: %s', site_path)
+				site_path.unlink(missing_ok=True)
+				content_from_site = self._relative_to_project(site_path)
+				LOGGER.info('Linking path: %s -> %s', site_path, content_from_site)
+				site_path.symlink_to(content_from_site)
+			else:
+				LOGGER.warning("Couldn't find file in project directory: %s", project_path_name)
