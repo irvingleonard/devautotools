@@ -9,126 +9,18 @@ from os import environ
 from pathlib import Path
 from shutil import rmtree
 from subprocess import run
-from sys import stderr
 from webbrowser import open as webbrowser_open
 
 from ._venv import deploy_local_venv
 
-DEFAULT_EXTRA_ENV_VARIABLES = {
-	'DJANGO_DEBUG': 'true',
-	'DJANGO_LOG_LEVEL': 'debug',
-	'PORT': '8080',
-}
 LOGGER = getLogger(__name__)
 
-def deploy_local_django_site(*secret_json_files_paths, system_site_packages=False, django_site_name='test_site', extra_files_to_link='', extra_subdirs='', create_cache_table=False, superuser_password='', just_build=False):
+def deploy_local_django_site(*secret_json_files_paths, system_site_packages=False, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', just_build=False):
 	"""Deploy a local Django site
 	Starts by deploying a new virtual environment via "deploy_local_env()" and then creates a test site with symlinks to the existing project files. It runs the test server until it gets stopped (usually with ctrl + c).
 	"""
-	
-	secret_json_files_paths = [Path(json_file_path) for json_file_path in secret_json_files_paths]
-	for json_file_path in secret_json_files_paths:
-		if not json_file_path.is_file():
-			raise RuntimeError('The provided file does not exists or is not accessible by you: {}'.format(json_file_path))
-	
-	environment_content = {}
-	for json_file_path in secret_json_files_paths:
-		environment_content.update({key.upper(): value for key, value in json_loads(json_file_path.read_text()).items()})
 
-	django_linked_site = DjangoLinkedSite(django_site_name)
-	django_linked_site.start()
-	return
-
-	virtual_env, pyproject_toml = deploy_local_venv(system_site_packages=system_site_packages)
-	current_directory = Path.cwd()
-	base_dir = current_directory / django_site_name
-	site_dir = base_dir / django_site_name
-	root_from_site = Path('..') / '..'
-	
-	LOGGER.info('Removing test site directory: %s', base_dir)
-	run(('rm', '-rfv', str(base_dir)), stdout=stderr)
-	
-	LOGGER.info('Creating a new test site')
-	virtual_env('startproject', django_site_name, program='django-admin')
-	
-	if ('tool' in pyproject_toml) and ('setuptools' in pyproject_toml['tool']) and (
-			'packages' in pyproject_toml['tool']['setuptools']) and (
-			'find' in pyproject_toml['tool']['setuptools']['packages']) and (
-			'include' in pyproject_toml['tool']['setuptools']['packages']['find']):
-		for pattern in pyproject_toml['tool']['setuptools']['packages']['find']['include']:
-			for resulting_path in current_directory.glob(pattern):
-				base_content = base_dir / resulting_path.name
-				content_from_base = Path('..') / resulting_path.name
-				LOGGER.info('Linking module content: %s -> %s', base_content, content_from_base)
-				base_content.symlink_to(content_from_base)
-	
-	PROJECT_TO_SITE_MAP = {
-		'settings.py': 'local_settings.py',
-		'urls.py'	: None,
-	}
-	extra_files_to_link = extra_files_to_link.split(',')
-	project_to_site_map = PROJECT_TO_SITE_MAP | dict(zip(extra_files_to_link, [None ] *len(extra_files_to_link)))
-	
-	for project_file_name, site_file_name in project_to_site_map.items():
-		if (current_directory / project_file_name).exists():
-			site_file = site_dir / project_file_name if site_file_name is None else site_file_name
-			LOGGER.info('Cleaning site file: %s', site_file)
-			site_file.unlink(missing_ok=True)
-			file_from_site = root_from_site / project_file_name
-			LOGGER.info('Linking file: %s -> %s', site_file, file_from_site)
-			site_file.symlink_to(file_from_site)
-		else:
-			LOGGER.warning("Couldn't find file in project directory: %s", project_file_name)
-	
-	extra_subdirs = extra_subdirs.split(',')
-	for extra_subdir_name in extra_subdirs:
-		extra_subdir = base_dir / extra_subdir_name
-		if extra_subdir.is_dir():
-			rmtree(extra_subdir)
-		elif extra_subdir.exists():
-			raise NotADirectoryError(extra_subdir)
-		LOGGER.info('Creating directory: %s', extra_subdir)
-		extra_subdir.mkdir(parents=True)
-	
-	manage_py = base_dir / 'manage.py'
-	if create_cache_table:
-		LOGGER.info('Creating the cache table')
-		virtual_env(str(manage_py), 'createcachetable', '--settings=test_site.local_settings', env=environ |environment_content)
-	
-	LOGGER.info('Applying migrations')
-	virtual_env(str(manage_py), 'migrate', '--settings=test_site.local_settings', env=environ |environment_content)
-	
-	result = [
-		'######################################################################',
-		'',
-		'You can run this again with:',
-		'',
-		'env DJANGO_DEBUG=true `./venv/bin/python -m env_pipes vars_from_file --uppercase_vars {secret_files}` ./venv/bin/python ./test_site/manage.py runserver --settings=test_site.local_settings'.format(secret_files=' '.join([str(s) for s in secret_json_files_paths])),
-		'',
-	]
-	
-	if len(superuser_password):
-		current_user = run(('whoami',), capture_output=True, text=True).stdout.strip('\n')
-		super_user_details = {
-			'DJANGO_SUPERUSER_LOGIN': current_user,
-			'DJANGO_SUPERUSER_FIRSTNAME': current_user,
-			'DJANGO_SUPERUSER_LASTNAME': current_user,
-			'DJANGO_SUPERUSER_EMAIL': '{}@example.local'.format(current_user),
-			'DJANGO_SUPERUSER_PASSWORD': superuser_password,
-		}
-		LOGGER.info('Creating the super user: %s', current_user)
-		virtual_env(str(manage_py), 'createsuperuser', '--noinput', '--settings=test_site.local_settings', program='python', env=environ | environment_content | super_user_details)
-		
-		result += [
-			'Then go to http://localhost:8000/admin and use credentials {user}:{password}'.format(user=current_user, password=superuser_password),
-			'',
-		]
-	
-	LOGGER.info('\n'.join(result + ['######################################################################']))
-	
-	if not just_build:
-		webbrowser_open('http://localhost:8000/admin')
-		return virtual_env(str(manage_py), 'runserver', '--settings=test_site.local_settings', program='python', env=environ | environment_content | {'DJANGO_DEBUG': 'true'})
+	return DjangoLinkedSite.deploy_locally(*secret_json_files_paths, system_site_packages=system_site_packages, django_site_name=django_site_name, extra_paths_to_link=extra_paths_to_link, create_cache_table=create_cache_table, superuser_password=superuser_password, just_build=just_build)
 
 
 class DjangoLinkedSite:
@@ -150,7 +42,7 @@ class DjangoLinkedSite:
 		"""
 		
 		if (name == 'venv') or (name == 'pyproject_toml'):
-			venv, pyproject_toml = deploy_local_venv()
+			venv, pyproject_toml = deploy_local_venv(self.system_site_packages)
 			if name == 'venv':
 				value = venv
 				self.__setattr__('pyproject_toml', pyproject_toml)
@@ -159,6 +51,8 @@ class DjangoLinkedSite:
 				self.__setattr__('venv', venv)
 		elif name == 'base_dir':
 			value = self.parent_dir / self.site_name
+		elif name == 'manage_py':
+			value = self.base_dir / 'manage.py'
 		elif name == 'site_dir':
 			value = self.base_dir / self.site_name
 		else:
@@ -167,7 +61,7 @@ class DjangoLinkedSite:
 		self.__setattr__(name, value)
 		return value
 	
-	def __init__(self, site_name, project_dir=Path.cwd(), parent_dir=Path.cwd(), virtual_environment_pyproject_toml=(None, None)):
+	def __init__(self, site_name, project_dir=Path.cwd(), parent_dir=Path.cwd(), virtual_environment_pyproject_toml=(None, None), system_site_packages=False):
 		"""
 		Magic initiation
 
@@ -176,27 +70,44 @@ class DjangoLinkedSite:
 		"""
 		
 		self.site_name = site_name
-		self.project_dir = Path(project_dir)
-		self.parent_dir = Path(parent_dir)
+		self.project_dir = Path(project_dir).absolute()
+		self.parent_dir = Path(parent_dir).absolute()
 		virtual_environment, pyproject_toml = virtual_environment_pyproject_toml
 		if (virtual_environment is not None) and (pyproject_toml is not None):
 			self.venv = virtual_environment
 			self.pyproject_toml = pyproject_toml
-	
-	def _relative_to_project(self, path):
+		self.system_site_packages = system_site_packages
+
+	@staticmethod
+	def _environ_from_json(*secret_json_files_paths):
+		"""Environ from JSON files
+		Parse content of JSON files and build environment dict.
 		"""
 
+		secret_json_files_paths = [Path(json_file_path) for json_file_path in secret_json_files_paths]
+		for json_file_path in secret_json_files_paths:
+			if not json_file_path.is_file():
+				raise RuntimeError('The provided file does not exists or is not accessible by you: {}'.format(json_file_path))
+
+		result = {}
+		for json_file_path in secret_json_files_paths:
+			result.update({key.upper(): value for key, value in json_loads(json_file_path.read_text()).items()})
+
+		return result
+
+	def _relative_to_project(self, path):
+		"""Relative path
+		Build a relative path from the one provided pointing to the project's dir. The "name" should be the one in the project dir, though.
 		"""
 		
 		path = Path(path)
 		if self.project_dir in path.parents:
 			return Path('.').joinpath(*([Path('..')] * path.parents.index(self.project_dir))) / path.name
 		else:
-			return (self.project_dir / path.name).absolute
+			return (self.project_dir / path.name).absolute()
 	
-	def start(self, overwrite=True, project_paths_to_site=''):
-		"""
-		Start the Django project
+	def create(self, overwrite=True, project_paths_to_site=''):
+		"""Create the Django site
 		Runs the basic "django-admin startproject" and also links the related files
 		"""
 		
@@ -217,15 +128,90 @@ class DjangoLinkedSite:
 					LOGGER.info('Linking module content: %s -> %s', base_content, content_from_base)
 					base_content.symlink_to(content_from_base)
 
-		project_paths_to_site = project_paths_to_site.split(',')
-		project_to_site_map = self.DEFAULT_PROJECT_TO_SITE_MAP | dict(zip(project_paths_to_site, [None ] *len(project_paths_to_site)))
+		project_paths_to_site = project_paths_to_site.split(',') if project_paths_to_site else []
+		project_to_site_map = self.DEFAULT_PROJECT_TO_SITE_MAP | dict(zip(project_paths_to_site, [None] *len(project_paths_to_site)))
 		for project_path_name, site_path_name in project_to_site_map.items():
 			if (self.project_dir / project_path_name).exists():
 				site_path = self.site_dir / (project_path_name if site_path_name is None else site_path_name)
-				LOGGER.info('Cleaning site file: %s', site_path)
-				site_path.unlink(missing_ok=True)
-				content_from_site = self._relative_to_project(site_path)
+				if site_path.exists():
+					LOGGER.info('Cleaning site path: %s', site_path)
+					site_path.unlink()
+				content_from_site = self._relative_to_project(self.site_dir / project_path_name)
 				LOGGER.info('Linking path: %s -> %s', site_path, content_from_site)
 				site_path.symlink_to(content_from_site)
 			else:
-				LOGGER.warning("Couldn't find file in project directory: %s", project_path_name)
+				LOGGER.warning("Couldn't find file in project directory: %s", project_path)
+
+	@classmethod
+	def deploy_locally(cls, *secret_json_files_paths, system_site_packages=False, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', just_build=False):
+		"""Deploy a local Django site
+		Starts by deploying a new virtual environment via "deploy_local_env()" and then creates a test site with symlinks to the existing project files. It runs the test server until it gets stopped (usually with ctrl + c).
+		"""
+
+		environment_content = cls._environ_from_json(*secret_json_files_paths)
+
+		site = cls(django_site_name, system_site_packages=system_site_packages)
+		site.create(project_paths_to_site=extra_paths_to_link)
+		superuser = site.initialize(environment_content=environment_content, create_cache_table=create_cache_table, superuser_password=superuser_password)
+
+		if secret_json_files_paths:
+			inline_vars = ['`./venv/bin/python -m env_pipes vars_from_file --uppercase_vars {secret_files}`'.format(secret_files=' '.join([str(s) for s in secret_json_files_paths]))]
+		else:
+			inline_vars = []
+
+		result = [
+			'######################################################################',
+			'',
+			'You can run this again with:',
+			'',
+			' '.join(['env DJANGO_DEBUG=true'] + inline_vars + ['./venv/bin/python ./test_site/manage.py runserver --settings=test_site.local_settings']),
+			'',
+		]
+
+		if superuser is not None:
+			result += [
+				'Then go to http://localhost:8000/admin and use credentials {user}:{password}'.format(user=superuser[0], password=superuser[1]),
+				'',
+			]
+
+		LOGGER.info('\n'.join(result + ['######################################################################']))
+
+		if not just_build:
+			site.start(*secret_json_files_paths)
+
+		return result
+
+	def initialize(self, environment_content={}, create_cache_table=False, superuser_password=''):
+		"""Initialize the Django site
+		Create the cache table if requested, apply the migrations and create a superuser using the currently logged in username ad the password provided.
+		"""
+
+		if create_cache_table:
+			LOGGER.info('Creating the cache table')
+			self.venv(str(self.manage_py), 'createcachetable', '--settings={}.local_settings'.format(self.site_name), env=environ|environment_content)
+
+		LOGGER.info('Applying migrations')
+		self.venv(str(self.manage_py), 'migrate', '--settings={}.local_settings'.format(self.site_name), env=environ|environment_content)
+
+		if len(superuser_password):
+			current_user = run(('whoami',), capture_output=True, text=True).stdout.strip('\n')
+			super_user_details = {
+				'DJANGO_SUPERUSER_LOGIN': current_user,
+				'DJANGO_SUPERUSER_FIRSTNAME': current_user,
+				'DJANGO_SUPERUSER_LASTNAME': current_user,
+				'DJANGO_SUPERUSER_EMAIL': '{}@example.local'.format(current_user),
+				'DJANGO_SUPERUSER_PASSWORD': superuser_password,
+			}
+			LOGGER.info('Creating the super user: %s', current_user)
+			self.venv(str(self.manage_py), 'createsuperuser', '--noinput', '--settings={}.local_settings'.format(self.site_name), env=environ|environment_content|super_user_details)
+			return current_user, superuser_password
+
+	def start(self, *secret_json_files_paths):
+		"""Start the Django site
+		Start the site using the "runserver" Django command and open it on the default browser.
+		"""
+
+		environment_content = self._environ_from_json(*secret_json_files_paths)
+
+		webbrowser_open('http://localhost:8000/admin')
+		return self.venv(str(self.manage_py), 'runserver', '--settings={}.local_settings'.format(self.site_name), env=environ|environment_content|{'DJANGO_DEBUG': 'true'})

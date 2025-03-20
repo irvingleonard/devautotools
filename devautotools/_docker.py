@@ -9,6 +9,11 @@ from os import environ
 from pathlib import Path
 from subprocess import run
 
+DEFAULT_EXTRA_ENV_VARIABLES = {
+	'DJANGO_DEBUG': 'true',
+	'DJANGO_LOG_LEVEL': 'debug',
+	'PORT': '8080',
+}
 LOGGER = getLogger(__name__)
 
 def start_local_docker_container(*secret_json_files_paths, extra_env_variables=None, platform=None, build_only=False):
