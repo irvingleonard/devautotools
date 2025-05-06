@@ -123,6 +123,7 @@ class VirtualEnvironmentManager:
 		if overwrite and self.path.exists():
 			if self.path in Path(executable).parents:
 				raise RuntimeError("You can't run this command from your virtual environment")
+			LOGGER.info('Deleting existing content')
 			rmtree(self.path)
 		
 		venv_extra_params = []
@@ -132,7 +133,9 @@ class VirtualEnvironmentManager:
 		if not self.path.exists():
 			if self._is_temp:
 				atexit_register(rmtree, self.path.parent, ignore_errors=True)
+			LOGGER.info('Creating virtual environment')
 			run((executable, '-m', 'venv', str(self.path), *venv_extra_params), capture_output=True, check=True, text=True)
+			LOGGER.info('Upgrading pip')
 			self('-m', 'pip', 'install', '--upgrade', 'pip')
 	
 	def __repr__(self):

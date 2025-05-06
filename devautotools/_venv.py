@@ -26,7 +26,7 @@ def deploy_local_venv(system_site_packages=False):
 	
 	with pyproject_toml_path.open('rb') as pyproject_toml_f:
 		pyproject_toml = tomli_load(pyproject_toml_f)
-	
+
 	if ('build-system' in pyproject_toml) and ('requires' in pyproject_toml['build-system']):
 		LOGGER.info('Installing build related modules')
 		virtual_env.install(*pyproject_toml['build-system']['requires'])
