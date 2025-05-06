@@ -58,7 +58,6 @@ def start_local_docker_container(*secret_json_files_paths, extra_env_variables=N
 
 		return run(('docker', 'logs', '-f', '{}_test'.format(current_directory.name)))
 
-
 def stop_local_docker_container():
 	"""Stop local Docker container
 	Stop a container started with "start_local_docker_container" on the current local directory.
