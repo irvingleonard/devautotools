@@ -140,7 +140,7 @@ class DjangoLinkedSite:
 				LOGGER.info('Linking path: %s -> %s', site_path, content_from_site)
 				site_path.symlink_to(content_from_site)
 			else:
-				LOGGER.warning("Couldn't find file in project directory: %s", project_path)
+				LOGGER.warning("Couldn't find file in project directory: %s", project_path_name)
 
 	@classmethod
 	def deploy_locally(cls, *secret_json_files_paths, system_site_packages=False, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', just_build=False):
