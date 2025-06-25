@@ -12,11 +12,15 @@ from ._venvctrl import VirtualEnvironmentManager
 
 LOGGER = getLogger(__name__)
 
-def deploy_local_venv(*, env_create_options={}, pip_install_options={}):
+def deploy_local_venv(*, env_create_options=None, pip_install_options=None):
 	"""Deploy a local virtual environment
 	Based on the current working directory, creates a python3 virtual environment (of the default python 3 on the system) on "./venv/" and populates it with the dependencies described on the "./pyproject.toml" file.
 	"""
 	
+	if env_create_options is None:
+		env_create_options = {}
+	if pip_install_options is None:
+		pip_install_options = {}
 	virtual_env = VirtualEnvironmentManager('venv', True, **env_create_options)
 	
 	pyproject_toml_path = Path.cwd() / 'pyproject.toml'
