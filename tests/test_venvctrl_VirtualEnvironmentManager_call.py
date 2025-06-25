@@ -20,7 +20,7 @@ class VirtualEnvironmentManagerTest(TestCase):
     @classmethod
     def setUpClass(cls):
         """
-        Setup the virtual environment on a local directory
+        Set up the virtual environment on a local directory
         """
         
         cls.venv = VirtualEnvironmentManager(cls.VENV_DIRECTORY_NAME)

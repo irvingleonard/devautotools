@@ -131,7 +131,7 @@ class VirtualEnvironmentManager:
 			if self._is_temp:
 				atexit_register(rmtree, self.path.parent, ignore_errors=True)
 			LOGGER.info('Creating virtual environment')
-			run((executable, '-m', 'venv', str(self.path), *options_for_cli(**create_options)), capture_output=True, check=True, text=True)
+			run((executable, '-m', 'venv', str(self.path), *options_for_cli(create_options)), capture_output=True, check=True, text=True)
 			LOGGER.info('Upgrading pip')
 			self('-m', 'pip', 'install', '--upgrade', 'pip')
 	
@@ -190,7 +190,7 @@ class VirtualEnvironmentManager:
 		"""
 
 		options['dest'] = dest
-		command = ['download'] + options_for_cli(**options) + list(packages)
+		command = ['download'] + options_for_cli(options) + list(packages)
 		return self(*command, program='pip')
 	
 	def freeze(self, list_format=None):
@@ -215,7 +215,7 @@ class VirtualEnvironmentManager:
 		:returns str: the result of the command "pip install ..."
 		"""
 
-		command = ['install'] + options_for_cli(**options) + list(packages)
+		command = ['install'] + options_for_cli(options) + list(packages)
 		return self(*command, program='pip')
 	
 	@property
