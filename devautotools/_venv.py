@@ -17,9 +17,9 @@ def deploy_local_venv(*, dev_from_pypi=False, env_create_options=None, pip_insta
 	Based on the current working directory, creates a python3 virtual environment (of the default python 3 on the system) on "./venv/" and populates it with the dependencies described on the "./pyproject.toml" file.
 	"""
 
-	if env_create_options is None:
+	if (env_create_options is None) or not env_create_options:
 		env_create_options = {}
-	if pip_install_options is None:
+	if (pip_install_options is None) or not pip_install_options:
 		pip_install_options = {}
 	if dev_from_pypi:
 		pip_install_options |= {
