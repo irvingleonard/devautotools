@@ -23,7 +23,7 @@ class VirtualEnvironmentManagerTest(TestCase):
         Setup the virtual environment on a local directory
         """
         
-        cls.venv = VirtualEnvironmentManager(path=cls.VENV_DIRECTORY_NAME)
+        cls.venv = VirtualEnvironmentManager(cls.VENV_DIRECTORY_NAME)
     
     @classmethod
     def tearDownClass(cls):
@@ -52,7 +52,7 @@ class TempVirtualEnvironmentManagerTest(TestCase):
         Setup the virtual environment on a local directory
         """
         
-        cls.venv = VirtualEnvironmentManager(path=None)
+        cls.venv = VirtualEnvironmentManager(None)
     
     def test_python_version(self):
         """
