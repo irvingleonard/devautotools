@@ -24,7 +24,7 @@ def deploy_local_venv(*, dev_from_pypi=False, env_create_options=None, pip_insta
 	if dev_from_pypi:
 		pip_install_options |= {
 			'pre': True,
-			'extra-index-url': 'https://pypi.org/simple',
+			'extra-index-url': 'https://test.pypi.org/simple',
 		}
 
 	virtual_env = VirtualEnvironmentManager('venv', True, **env_create_options)
