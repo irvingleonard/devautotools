@@ -16,6 +16,8 @@ from tempfile import mkdtemp
 
 from pip._vendor.packaging.tags import sys_tags
 
+from ._utils import options_for_cli
+
 LOGGER = getLogger(__name__)
 
 
@@ -98,43 +100,38 @@ class VirtualEnvironmentManager:
 		self.__setattr__(name, value)
 		return value
 	
-	def __init__(self, path='venv', overwrite=False, system_site_packages=False):
+	def __init__(self, _path='venv', _overwrite=False, /, **create_options):
 		"""Magic initialization
 		Initial environment creation, re-creation, or just assume it's there.
 
-		:param str|Path? path: the root path for the virtual environment
-		:param bool? overwrite: always creates new virtual environments (it deletes the existing one first)
-		:param bool? system_site_packages: add the "--system-site-packages" switch to the venv creation
+		:param str|Path? _path: the root path for the virtual environment
+		:param bool? _overwrite: always creates new virtual environments (it deletes the existing one first)
+		:param Any? create_options: map of options to pass to the "create" command.
 		"""
 		
-		if path is None:
+		if _path is None:
 			self.path = (Path(mkdtemp()) / 'venv').absolute()
 			self._is_temp = True
 		else:
-			self.path = Path(path).absolute()
+			self.path = Path(_path).absolute()
 			self._is_temp = False
 		
 		# Storing for __repr__
-		if overwrite:
-			self._overwrite = overwrite
-		if system_site_packages:
-			self._system_site_packages = system_site_packages
+		if _overwrite:
+			self._overwrite = _overwrite
+		self._create_options = create_options
 		
-		if overwrite and self.path.exists():
+		if _overwrite and self.path.exists():
 			if self.path in Path(executable).parents:
 				raise RuntimeError("You can't run this command from your virtual environment")
 			LOGGER.info('Deleting existing content')
 			rmtree(self.path)
 		
-		venv_extra_params = []
-		if system_site_packages:
-			venv_extra_params.append('--system-site-packages')
-		
 		if not self.path.exists():
 			if self._is_temp:
 				atexit_register(rmtree, self.path.parent, ignore_errors=True)
 			LOGGER.info('Creating virtual environment')
-			run((executable, '-m', 'venv', str(self.path), *venv_extra_params), capture_output=True, check=True, text=True)
+			run((executable, '-m', 'venv', str(self.path), *options_for_cli(**create_options)), capture_output=True, check=True, text=True)
 			LOGGER.info('Upgrading pip')
 			self('-m', 'pip', 'install', '--upgrade', 'pip')
 	
@@ -146,13 +143,12 @@ class VirtualEnvironmentManager:
 		"""
 		
 		if self._is_temp:
-			parameters = ['path=None']
+			parameters = ['None']
 		else:
-			parameters = ['path=' + repr(str(self.path))]
+			parameters = [repr(str(self.path))]
 		if hasattr(self, '_overwrite'):
-			parameters.append('overwrite=' + repr(self._overwrite))
-		if hasattr(self, '_system_site_packages'):
-			parameters.append('system_site_packages=' + repr(self._system_site_packages))
+			parameters.append(repr(self._overwrite))
+		parameters += [f'{option}={repr(value)}' for option, value in self._create_options.items()]
 		return '{}({})'.format(type(self).__name__, ', '.join(parameters))
 	
 	def __str__(self):
@@ -183,21 +179,18 @@ class VirtualEnvironmentManager:
 		
 		return bool(possible_tags & self.compatible_tags)
 	
-	def download(self, *packages, dest='.', no_deps=True):
+	def download(self, *packages, dest='.', **options):
 		"""Downloads a package
 		The "packages" can be whatever "pip download" expects.
 
 		:param str packages: a list of packages to download. Could be anything that "pip download" expects
 		:param str|Path? dest: place to put the downloaded wheels
-		:param bool? no_deps: if provided adds the "--no-deps" switch to the command
+		:param options: map of options to pass to the "download" command.
 		:returns str: the result of the command, "pip download ..."
 		"""
-		
-		command = ['download', '--dest', dest]
-		if no_deps:
-			command.append('--no-deps')
-		command += list(packages)
-		
+
+		options['dest'] = dest
+		command = ['download'] + options_for_cli(**options) + list(packages)
 		return self(*command, program='pip')
 	
 	def freeze(self, list_format=None):
@@ -213,26 +206,16 @@ class VirtualEnvironmentManager:
 		else:
 			return self('list', '--format', list_format, program='pip', capture_output=True).stdout
 	
-	def install(self, *packages, upgrade=False, no_index=False, no_deps=False):
+	def install(self, *packages, **options):
 		"""Installs a package
-		The package can be whatever "pip install" expects.
+		The package can be whatever "pip install" expects and the behavior can be controlled with switches.
 
 		:param str packages: a list of packages to install. Could be anything that "pip install" expects
-		:param bool? upgrade: if provided adds the "--upgrade" switch to the command
-		:param bool? no_index: if provided adds the "--no-index" switch to the command
-		:param bool? no_deps: if provided adds the "--no-deps" switch to the command
+		:param options: map of the options to pass to the "install" command.
 		:returns str: the result of the command "pip install ..."
 		"""
-		
-		command = ['install']
-		if upgrade:
-			command.append('--upgrade')
-		if no_index:
-			command.append('--no-index')
-		if no_deps:
-			command.append('--no-deps')
-		command += list(packages)
-		
+
+		command = ['install'] + options_for_cli(**options) + list(packages)
 		return self(*command, program='pip')
 	
 	@property
