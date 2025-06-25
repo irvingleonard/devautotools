@@ -6,7 +6,7 @@ primarily for tasks related to command-line interface (CLI) generation
 and other common operations.
 """
 
-def options_for_cli(**options):
+def options_for_cli(options={}, /, sanitize_keys=False):
 	"""Convert keyword arguments to a list of command-line options.
 
 	:param options: Keyword arguments where the key is the option name and the value is the option's value.
@@ -16,11 +16,13 @@ def options_for_cli(**options):
 	"""
 
 	cli_content = []
-	for option, value in options:
+	for option, value in options.items():
 		if len(option) == 1:
 			option = f'-{option}'
 		else:
-			option = f'--{option.replace("_", "-")}'
+			if sanitize_keys:
+				option = option.replace("_", "-")
+			option = f'--{option}'
 		if not isinstance(value, bool):
 			cli_content += [option, value]
 		elif value:
