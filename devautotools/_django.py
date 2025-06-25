@@ -18,12 +18,12 @@ from ._venv import deploy_local_venv
 LOGGER = getLogger(__name__)
 REQUIRED_SECTION_RE = re_compile(r'(:?.+_required)|(:?required_.+)', RE_IGNORECASE)
 
-def deploy_local_django_site(*secret_json_files_paths, venv_options={}, pip_install_options={}, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', just_build=False):
+def deploy_local_django_site(*secret_json_files_paths, dev_from_pypi=False, venv_options={}, pip_install_options={}, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', just_build=False):
 	"""Deploy a local Django site
 	Starts by deploying a new virtual environment via "deploy_local_env()" and then creates a test site with symlinks to the existing project files. It runs the test server until it gets stopped (usually with ctrl + c).
 	"""
 
-	return DjangoLinkedSite.deploy_locally(*secret_json_files_paths, django_site_name=django_site_name, extra_paths_to_link=extra_paths_to_link, create_cache_table=create_cache_table, superuser_password=superuser_password, venv_options=venv_options, pip_install_options=pip_install_options, just_build=just_build)
+	return DjangoLinkedSite.deploy_locally(*secret_json_files_paths, django_site_name=django_site_name, extra_paths_to_link=extra_paths_to_link, create_cache_table=create_cache_table, superuser_password=superuser_password, dev_from_pypi=dev_from_pypi, venv_options=venv_options, pip_install_options=pip_install_options, just_build=just_build)
 
 
 def django_settings_env_capture(**expected_sections):
@@ -89,7 +89,7 @@ class DjangoLinkedSite:
 		"""
 		
 		if (name == 'venv') or (name == 'pyproject_toml'):
-			venv, pyproject_toml = deploy_local_venv(env_create_options=self.venv_options, pip_install_options=self.pip_install_options)
+			venv, pyproject_toml = deploy_local_venv(dev_from_pypi=self.dev_from_pypi, env_create_options=self.venv_options, pip_install_options=self.pip_install_options)
 			if name == 'venv':
 				value = venv
 				self.__setattr__('pyproject_toml', pyproject_toml)
@@ -108,7 +108,7 @@ class DjangoLinkedSite:
 		self.__setattr__(name, value)
 		return value
 	
-	def __init__(self, site_name, project_dir=Path.cwd(), parent_dir=Path.cwd(), virtual_environment_pyproject_toml=(None, None), venv_options={}, pip_install_options={}):
+	def __init__(self, site_name, project_dir=Path.cwd(), parent_dir=Path.cwd(), virtual_environment_pyproject_toml=(None, None), dev_from_pypi=False, venv_options={}, pip_install_options={}):
 		"""
 		Magic initiation
 
@@ -123,6 +123,7 @@ class DjangoLinkedSite:
 		if (virtual_environment is not None) and (pyproject_toml is not None):
 			self.venv = virtual_environment
 			self.pyproject_toml = pyproject_toml
+		self.dev_from_pypi = dev_from_pypi
 		self.venv_options = venv_options
 		self.pip_install_options = pip_install_options
 
@@ -191,14 +192,14 @@ class DjangoLinkedSite:
 				LOGGER.warning("Couldn't find file in project directory: %s", project_path_name)
 
 	@classmethod
-	def deploy_locally(cls, *secret_json_files_paths, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', venv_options={}, pip_install_options={}, just_build=False):
+	def deploy_locally(cls, *secret_json_files_paths, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', dev_from_pypi=False, venv_options={}, pip_install_options={}, just_build=False):
 		"""Deploy a local Django site
 		Starts by deploying a new virtual environment via "deploy_local_env()" and then creates a test site with symlinks to the existing project files. It runs the test server until it gets stopped (usually with ctrl + c).
 		"""
 
 		environment_content = cls._environ_from_json(*secret_json_files_paths)
 
-		site = cls(django_site_name, venv_options=venv_options, pip_install_options=pip_install_options)
+		site = cls(django_site_name, dev_from_pypi=dev_from_pypi, venv_options=venv_options, pip_install_options=pip_install_options)
 		site.create(project_paths_to_site=extra_paths_to_link)
 		superuser = site.initialize(environment_content=environment_content, create_cache_table=create_cache_table, superuser_password=superuser_password)
 
