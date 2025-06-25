@@ -5,15 +5,18 @@ Some helper functionality around Django projects.
 
 from json import loads as json_loads
 from logging import getLogger
-from os import environ
+from os import environ, getenv
 from pathlib import Path
+from re import compile as re_compile, search as re_search, IGNORECASE as RE_IGNORECASE
 from shutil import rmtree
 from subprocess import run
+from warnings import warn
 from webbrowser import open as webbrowser_open
 
 from ._venv import deploy_local_venv
 
 LOGGER = getLogger(__name__)
+REQUIRED_SECTION_RE = re_compile(r'(:?.+_required)|(:?required_.+)', RE_IGNORECASE)
 
 def deploy_local_django_site(*secret_json_files_paths, system_site_packages=False, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', just_build=False):
 	"""Deploy a local Django site
@@ -21,6 +24,49 @@ def deploy_local_django_site(*secret_json_files_paths, system_site_packages=Fals
 	"""
 
 	return DjangoLinkedSite.deploy_locally(*secret_json_files_paths, system_site_packages=system_site_packages, django_site_name=django_site_name, extra_paths_to_link=extra_paths_to_link, create_cache_table=create_cache_table, superuser_password=superuser_password, just_build=just_build)
+
+def django_settings_env_capture(**expected_sections):
+	"""Capture Django settings
+	Parses the current environment and collect variables applicable to the Django site.
+
+	:param expected_sections:
+	:type expected_sections:
+	:return:
+	:rtype:
+	"""
+
+	required_expected_sections, optional_expected_sections = set(), set()
+	for expected_section in expected_sections.items():
+		if re_search(REQUIRED_SECTION_RE, expected_section) is None:
+			required_expected_sections.add(expected_section)
+		else:
+			optional_expected_sections.add(expected_section)
+	environmental_settings, missing_setting_from_env = {}, []
+
+	for required_section in required_expected_sections:
+		for required_setting in expected_sections[required_section]:
+			required_setting_value = getenv(required_setting, '')
+			if len(required_setting_value):
+				environmental_settings[required_setting] = required_setting_value
+			else:
+				missing_setting_from_env.append(required_setting)
+	if len(missing_setting_from_env):
+		raise RuntimeError(f'Missing required settings from env: {missing_setting_from_env}')
+
+	for optional_section in optional_expected_sections:
+		for optional_setting in expected_sections[optional_section]:
+			optional_setting_value = getenv(optional_setting, '')
+			if len(optional_setting_value):
+				environmental_settings[optional_setting] = optional_setting_value
+			else:
+				missing_setting_from_env.append(optional_setting)
+	if len(missing_setting_from_env):
+		warn(f'Missing optional settings from env: {missing_setting_from_env}', RuntimeWarning)
+	for key, value in environ.items():
+		if key[:7] == 'DJANGO_':
+			environmental_settings[key] = value
+
+	return environmental_settings
 
 
 class DjangoLinkedSite:
