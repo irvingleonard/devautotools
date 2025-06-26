@@ -3,20 +3,113 @@
 Some helper functionality around Django projects.
 """
 
+from atexit import register as atexit_register
+from base64 import b64decode
 from json import loads as json_loads
 from logging import getLogger
-from os import environ, getenv
+from os import environ, getenv, remove as os_remove
 from pathlib import Path
 from re import compile as re_compile, search as re_search, IGNORECASE as RE_IGNORECASE
 from shutil import rmtree
 from subprocess import run
+from tempfile import mkstemp
 from warnings import warn
 from webbrowser import open as webbrowser_open
 
 from ._venv import deploy_local_venv
 
 LOGGER = getLogger(__name__)
+POSSIBLE_LOG_LEVELS = ('INFO', 'CRITICAL', 'ERROR', 'WARNING', 'DEBUG')
 REQUIRED_SECTION_RE = re_compile(r'(:?.+_required)|(:?required_.+)', RE_IGNORECASE)
+SSL_FILE_OPTIONS = ('sslcert', 'sslkey', 'sslrootcert')
+TRUTH_LOWERCASE_STRING_VALUES = ('true', 'yes', 'on', '1')
+
+def django_common_settings(settings_globals):
+
+	django_settings = settings_globals.copy()
+
+	if 'EXPECTED_VALUES_FROM_ENV' not in django_settings:
+		django_settings['EXPECTED_VALUES_FROM_ENV'] = {}
+
+	if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
+		django_settings['ENVIRONMENTAL_SETTINGS'] = django_settings_env_capture(**django_settings['EXPECTED_VALUES_FROM_ENV'])
+	django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
+
+	django_settings['DEBUG'] = django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_DEBUG', '').lower() in TRUTH_LOWERCASE_STRING_VALUES
+
+	django_log_level = django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_LOG_LEVEL', '').upper()
+	if django_log_level not in POSSIBLE_LOG_LEVELS:
+		django_log_level = POSSIBLE_LOG_LEVELS[0]
+	django_settings['LOGGING'] = {
+		'version': 1,
+		'disable_existing_loggers': False,
+		'handlers': {
+			'console': {
+				'level': 'DEBUG',
+				'class': 'logging.StreamHandler',
+			},
+		},
+		'loggers': {
+			'': {
+				'handlers': ['console'],
+				'level': 'DEBUG' if django_settings['DEBUG'] else django_log_level,
+				'propagate': True,
+			},
+		},
+	}
+
+	django_settings['STATIC_URL'] = '/static/'
+	django_settings['STATIC_ROOT'] = django_settings['BASE_DIR'] / 'storage' / 'staticfiles'
+	django_settings['STORAGES'] = {
+		'default': {
+			'BACKEND': 'django.core.files.storage.FileSystemStorage',
+			'OPTIONS': {
+				'location': django_settings['BASE_DIR'] / 'storage' / 'media',
+			},
+		},
+		'staticfiles': {
+			'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage',
+			'OPTIONS': {
+				'location': django_settings['STATIC_ROOT'],
+				'base_url': django_settings['STATIC_URL'],
+			},
+		},
+	}
+
+	database_settings, database_options = {}, {}
+	for key in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		if key[:24] == 'DJANGO_DATABASE_OPTIONS_':
+			local_key = key[24:]
+			database_options[local_key.lower()] = django_settings['ENVIRONMENTAL_SETTINGS'][local_key]
+		elif key[:16] == 'DJANGO_DATABASE_':
+			local_key = key[16:]
+			database_settings[local_key] = django_settings['ENVIRONMENTAL_SETTINGS'][local_key]
+	if database_settings:
+		if database_options:
+			for key in list(database_options.keys()):
+				if key.rstrip('_base64').rstrip('_content') in SSL_FILE_OPTIONS:
+					if key[-7:] == '_base64':
+						clean_key = key[:-7]
+						file_content = b64decode(django_settings['ENVIRONMENTAL_SETTINGS'][key]).decode()
+					elif key[-8:] == '_content':
+						clean_key = key[:-8]
+						file_content = django_settings['ENVIRONMENTAL_SETTINGS'][key]
+					else:
+						warn(f'Unknown Database SSL file option variation: {key}', RuntimeWarning)
+						continue
+					file_desc, file_path = mkstemp(text=True)
+					atexit_register(os_remove, file_path)
+					with open(file_path, 'wt') as file_obj:
+						file_obj.write(file_content)
+					database_options[clean_key] = file_path
+			database_settings['OPTIONS'] = database_options
+		else:
+			warn(f'Potentially missing database SSL options; the connection could be insecure: {SSL_FILE_OPTIONS}')
+		django_settings['DATABASES'] = {'default' : database_settings}
+	else:
+		warn('Not enough information to connect to an external database; using the builtin SQLite', RuntimeWarning)
+
+	return django_settings
 
 def deploy_local_django_site(*secret_json_files_paths, dev_from_pypi=False, venv_options={}, pip_install_options={}, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', just_build=False):
 	"""Deploy a local Django site
@@ -37,11 +130,11 @@ def django_settings_env_capture(**expected_sections):
 	"""
 
 	required_expected_sections, optional_expected_sections = set(), set()
-	for expected_section in expected_sections.items():
+	for expected_section in expected_sections:
 		if re_search(REQUIRED_SECTION_RE, expected_section) is None:
-			required_expected_sections.add(expected_section)
-		else:
 			optional_expected_sections.add(expected_section)
+		else:
+			required_expected_sections.add(expected_section)
 	environmental_settings, missing_setting_from_env = {}, []
 
 	for required_section in required_expected_sections:
