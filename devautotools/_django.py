@@ -25,7 +25,15 @@ SSL_FILE_OPTIONS = ('sslcert', 'sslkey', 'sslrootcert')
 TRUTH_LOWERCASE_STRING_VALUES = ('true', 'yes', 'on', '1')
 
 def django_common_settings(settings_globals):
+	"""Common values for Django
+	Generates Django values for your settings.py file. It's usually added as:
 
+	global_state = globals()
+	global_state |= django_common_settings(globals())
+
+	:param settings_globals: the caller's "globals"
+	:return: new content for "globals"
+	"""
 	django_settings = settings_globals.copy()
 
 	if 'EXPECTED_VALUES_FROM_ENV' not in django_settings:
