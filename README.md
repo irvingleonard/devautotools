@@ -1,18 +1,18 @@
 # devautotools
 
-This module contains a diverse collection of functionalities to make python devs' work easier (hopefully). Most of them are very opinionated so they might not work for you, but if you're ok with the values used or don't care it might save you some serious time.
+This module contains a diverse collection of functionalities to make python devs' work easier (hopefully). Most of them are very opinionated so they might not work for you, but if you're ok with the values used, or don't care, it might save you some time.
 
-This is a command line based tool, so, feel free to `--help` yourself around. This document assumes that you have the module installed in `~/venv` which you could accomplish with:
+This is a command line based tool, so, feel free to `--help` yourself around. This document assumes that you have the module installed in `~/venv` which could be accomplished with:
 ```
 python3 -m venv ~/venv
 ~/venv/bin/python -m pip install --upgrade pip
 ~/venv/bin/pip install devautotools
 ```
-The Windows version would instead use `~/venv/Scripts/python.exe` and `~/venv/Scripts/pip.exe`.
+The Windows version would use `~/venv/Scripts/python.exe` and `~/venv/Scripts/pip.exe` instead.
 
 ## deploy_local_venv
 
-The basic functionality: creating virtual environments. There are many ways of managing virtual environment and several tools for that. Here we assumed you're not using any of those, just a `venv/` directory in the root of your project. This function will re-create such environment based on the OS default python 3 and install ALL the dependencies. It works solely with projects that use `pyproject.toml` files. It will fail if the dependencies handled on `setup.py`, the old way of doing so. You can use the supplied options to change the way the `env` command is called or the way `pip install` is run. It would work as simple as that:
+There are many ways of managing virtual environments and several tools for that. Here we assumed you're not using any of those, just a `venv/` directory in the root of your project. This function will re-create such environment based on the OS default python 3 and install ALL the dependencies. It works solely with projects that use `pyproject.toml` files. It will fail if the dependencies handled on `setup.py`, the old way of doing so. You can use the supplied options to change the way the `env` command is called or the way `pip install` is run. It would work as simple as that:
 ```
 ~/venv/bin/python -m devautotools deploy_local_venv
 ```
