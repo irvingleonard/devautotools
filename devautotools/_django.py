@@ -301,11 +301,12 @@ class DjangoLinkedSite:
 		environment_content = cls._environ_from_json(*secret_json_files_paths)
 
 		site = cls(django_site_name, dev_from_pypi=dev_from_pypi, venv_options=venv_options, pip_install_options=pip_install_options)
+		site.venv.install('devautotools', **pip_install_options)
 		site.create(project_paths_to_site=extra_paths_to_link)
 		superuser = site.initialize(environment_content=environment_content, create_cache_table=create_cache_table, superuser_password=superuser_password)
 
 		if secret_json_files_paths:
-			inline_vars = ['`./venv/bin/python -m env_pipes vars_from_file --uppercase_vars {secret_files}`'.format(secret_files=' '.join([str(s) for s in secret_json_files_paths]))]
+			inline_vars = ['`./venv/bin/python -m devautotools env_vars_from_json --uppercase_vars {secret_files}`'.format(secret_files=' '.join([str(s) for s in secret_json_files_paths]))]
 		else:
 			inline_vars = []
 
