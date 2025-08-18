@@ -24,7 +24,7 @@ REQUIRED_SECTION_RE = re_compile(r'(:?.+_required)|(:?required_.+)', RE_IGNORECA
 SSL_FILE_OPTIONS = ('sslcert', 'sslkey', 'sslrootcert')
 TRUTH_LOWERCASE_STRING_VALUES = ('true', 'yes', 'on', '1')
 
-def django_common_settings(settings_globals):
+def django_common_settings(settings_globals, parent_callables=None):
 	"""Common values for Django
 	Generates Django values for your settings.py file. It's usually added as:
 
@@ -32,16 +32,29 @@ def django_common_settings(settings_globals):
 	global_state |= django_common_settings(globals())
 
 	:param settings_globals: the caller's "globals"
+	:param parent_callables: an optional list of parent "common_settings" callables
+	:type parent_callables: [callable]|None
 	:return: new content for "globals"
 	"""
+
 	django_settings = settings_globals.copy()
 
 	if 'EXPECTED_VALUES_FROM_ENV' not in django_settings:
 		django_settings['EXPECTED_VALUES_FROM_ENV'] = {}
 
-	if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
-		django_settings['ENVIRONMENTAL_SETTINGS'] = django_settings_env_capture(**django_settings['EXPECTED_VALUES_FROM_ENV'])
-	django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
+	if parent_callables is None:
+		if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
+			django_settings['ENVIRONMENTAL_SETTINGS'] = {}
+		django_settings['ENVIRONMENTAL_SETTINGS'] |= django_settings_env_capture()
+		django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
+	elif parent_callables:
+		parent_common_settings = parent_callables.pop(0)
+		django_settings = parent_common_settings(django_settings, parent_callables=parent_callables)
+	else:
+		if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
+			django_settings['ENVIRONMENTAL_SETTINGS'] = {}
+		django_settings['ENVIRONMENTAL_SETTINGS'] |= django_settings_env_capture(**django_settings['EXPECTED_VALUES_FROM_ENV'])
+		django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
 
 	django_settings['DEBUG'] = django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_DEBUG', '').lower() in TRUTH_LOWERCASE_STRING_VALUES
 
