@@ -126,6 +126,7 @@ def common_settings(settings_globals, parent_callables=None):
 
 	if 'EXPECTED_VALUES_FROM_ENV' not in django_settings:
 		django_settings['EXPECTED_VALUES_FROM_ENV'] = {}
+	django_settings['EXPECTED_VALUES_FROM_ENV'] |= EXPECTED_VALUES_FROM_ENV
 
 	if parent_callables is None:
 		if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
