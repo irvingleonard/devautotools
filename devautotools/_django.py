@@ -56,7 +56,7 @@ def django_common_settings(settings_globals, parent_callables=None):
 		django_settings['ENVIRONMENTAL_SETTINGS'] |= django_settings_env_capture(**django_settings['EXPECTED_VALUES_FROM_ENV'])
 		django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
 
-	django_settings['DEBUG'] = django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_DEBUG', '').lower() in TRUTH_LOWERCASE_STRING_VALUES
+	django_settings['DEBUG'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_DEBUG', ''))
 
 	django_log_level = django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_LOG_LEVEL', '').upper()
 	if django_log_level not in POSSIBLE_LOG_LEVELS:
@@ -96,6 +96,8 @@ def django_common_settings(settings_globals, parent_callables=None):
 			},
 		},
 	}
+	Path(django_settings['STORAGES']['default']['OPTIONS']['location']).mkdir(parents=True, exist_ok=True)
+	Path(django_settings['STORAGES']['staticfiles']['OPTIONS']['location']).mkdir(parents=True, exist_ok=True)
 
 	database_settings, database_options = {}, {}
 	for key in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
@@ -108,8 +110,12 @@ def django_common_settings(settings_globals, parent_callables=None):
 	if database_settings:
 		if database_options:
 			for key in list(database_options.keys()):
-				if key.rstrip('_base64').rstrip('_content') in SSL_FILE_OPTIONS:
-					if key[-7:] == '_base64':
+				if key.rstrip('_base64').rstrip('_content').rstrip('_path') in SSL_FILE_OPTIONS:
+					if key[-5:] == '_path':
+						clean_key = key[:-5]
+						file_content = None
+						file_path = database_options[key]
+					elif key[-7:] == '_base64':
 						clean_key = key[:-7]
 						file_content = b64decode(django_settings['ENVIRONMENTAL_SETTINGS'][key]).decode()
 					elif key[-8:] == '_content':
@@ -118,10 +124,11 @@ def django_common_settings(settings_globals, parent_callables=None):
 					else:
 						warn(f'Unknown Database SSL file option variation: {key}', RuntimeWarning)
 						continue
-					file_desc, file_path = mkstemp(text=True)
-					atexit_register(os_remove, file_path)
-					with open(file_path, 'wt') as file_obj:
-						file_obj.write(file_content)
+					if file_content is not None:
+						file_desc, file_path = mkstemp(text=True)
+						atexit_register(os_remove, file_path)
+						with open(file_path, 'wt') as file_obj:
+							file_obj.write(file_content)
 					database_options[clean_key] = file_path
 			database_settings['OPTIONS'] = database_options
 		else:
@@ -183,6 +190,15 @@ def django_settings_env_capture(**expected_sections):
 
 	return environmental_settings
 
+def setting_is_true(value):
+	"""Setting is True
+	Compares the provided string to the known "truth" values. Uses the list in TRUTH_LOWERCASE_STRING_VALUES.
+
+	:param str value: the value to check
+	:returns bool: if the string matches a "true" value
+	"""
+
+	return value.strip().lower() in TRUTH_LOWERCASE_STRING_VALUES
 
 class DjangoLinkedSite:
 	"""Django linked site
