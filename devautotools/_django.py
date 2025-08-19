@@ -330,6 +330,13 @@ class DjangoLinkedSite:
 		environment_content = cls._environ_from_json(*secret_json_files_paths)
 
 		site = cls(django_site_name, dev_from_pypi=dev_from_pypi, venv_options=venv_options, pip_install_options=pip_install_options)
+		if (pip_install_options is None) or not pip_install_options:
+			pip_install_options = {}
+		if dev_from_pypi:
+			pip_install_options |= {
+				'pre': True,
+				'extra-index-url': 'https://test.pypi.org/simple',
+			}
 		site.venv.install('devautotools', **pip_install_options)
 		site.create(project_paths_to_site=extra_paths_to_link)
 		superuser = site.initialize(environment_content=environment_content, create_cache_table=create_cache_table, superuser_password=superuser_password)
