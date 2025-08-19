@@ -24,7 +24,7 @@ REQUIRED_SECTION_RE = re_compile(r'(:?.+_required)|(:?required_.+)', RE_IGNORECA
 SSL_FILE_OPTIONS = ('sslcert', 'sslkey', 'sslrootcert')
 TRUTH_LOWERCASE_STRING_VALUES = ('true', 'yes', 'on', '1')
 
-def django_common_settings(settings_globals):
+def django_common_settings(settings_globals, parent_callables=None):
 	"""Common values for Django
 	Generates Django values for your settings.py file. It's usually added as:
 
@@ -32,18 +32,31 @@ def django_common_settings(settings_globals):
 	global_state |= django_common_settings(globals())
 
 	:param settings_globals: the caller's "globals"
+	:param parent_callables: an optional list of parent "common_settings" callables
+	:type parent_callables: [callable]|None
 	:return: new content for "globals"
 	"""
+
 	django_settings = settings_globals.copy()
 
 	if 'EXPECTED_VALUES_FROM_ENV' not in django_settings:
 		django_settings['EXPECTED_VALUES_FROM_ENV'] = {}
 
-	if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
-		django_settings['ENVIRONMENTAL_SETTINGS'] = django_settings_env_capture(**django_settings['EXPECTED_VALUES_FROM_ENV'])
-	django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
+	if parent_callables is None:
+		if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
+			django_settings['ENVIRONMENTAL_SETTINGS'] = {}
+		django_settings['ENVIRONMENTAL_SETTINGS'] |= django_settings_env_capture()
+		django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
+	elif parent_callables:
+		parent_common_settings = parent_callables.pop(0)
+		django_settings = parent_common_settings(django_settings, parent_callables=parent_callables)
+	else:
+		if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
+			django_settings['ENVIRONMENTAL_SETTINGS'] = {}
+		django_settings['ENVIRONMENTAL_SETTINGS'] |= django_settings_env_capture(**django_settings['EXPECTED_VALUES_FROM_ENV'])
+		django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
 
-	django_settings['DEBUG'] = django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_DEBUG', '').lower() in TRUTH_LOWERCASE_STRING_VALUES
+	django_settings['DEBUG'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_DEBUG', ''))
 
 	django_log_level = django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_LOG_LEVEL', '').upper()
 	if django_log_level not in POSSIBLE_LOG_LEVELS:
@@ -83,6 +96,8 @@ def django_common_settings(settings_globals):
 			},
 		},
 	}
+	Path(django_settings['STORAGES']['default']['OPTIONS']['location']).mkdir(parents=True, exist_ok=True)
+	Path(django_settings['STORAGES']['staticfiles']['OPTIONS']['location']).mkdir(parents=True, exist_ok=True)
 
 	database_settings, database_options = {}, {}
 	for key in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
@@ -95,8 +110,12 @@ def django_common_settings(settings_globals):
 	if database_settings:
 		if database_options:
 			for key in list(database_options.keys()):
-				if key.rstrip('_base64').rstrip('_content') in SSL_FILE_OPTIONS:
-					if key[-7:] == '_base64':
+				if key.rstrip('_base64').rstrip('_content').rstrip('_path') in SSL_FILE_OPTIONS:
+					if key[-5:] == '_path':
+						clean_key = key[:-5]
+						file_content = None
+						file_path = database_options[key]
+					elif key[-7:] == '_base64':
 						clean_key = key[:-7]
 						file_content = b64decode(django_settings['ENVIRONMENTAL_SETTINGS'][key]).decode()
 					elif key[-8:] == '_content':
@@ -105,10 +124,11 @@ def django_common_settings(settings_globals):
 					else:
 						warn(f'Unknown Database SSL file option variation: {key}', RuntimeWarning)
 						continue
-					file_desc, file_path = mkstemp(text=True)
-					atexit_register(os_remove, file_path)
-					with open(file_path, 'wt') as file_obj:
-						file_obj.write(file_content)
+					if file_content is not None:
+						file_desc, file_path = mkstemp(text=True)
+						atexit_register(os_remove, file_path)
+						with open(file_path, 'wt') as file_obj:
+							file_obj.write(file_content)
 					database_options[clean_key] = file_path
 			database_settings['OPTIONS'] = database_options
 		else:
@@ -170,6 +190,15 @@ def django_settings_env_capture(**expected_sections):
 
 	return environmental_settings
 
+def setting_is_true(value):
+	"""Setting is True
+	Compares the provided string to the known "truth" values. Uses the list in TRUTH_LOWERCASE_STRING_VALUES.
+
+	:param str value: the value to check
+	:returns bool: if the string matches a "true" value
+	"""
+
+	return value.strip().lower() in TRUTH_LOWERCASE_STRING_VALUES
 
 class DjangoLinkedSite:
 	"""Django linked site
@@ -301,11 +330,12 @@ class DjangoLinkedSite:
 		environment_content = cls._environ_from_json(*secret_json_files_paths)
 
 		site = cls(django_site_name, dev_from_pypi=dev_from_pypi, venv_options=venv_options, pip_install_options=pip_install_options)
+		site.venv.install('devautotools', **pip_install_options)
 		site.create(project_paths_to_site=extra_paths_to_link)
 		superuser = site.initialize(environment_content=environment_content, create_cache_table=create_cache_table, superuser_password=superuser_password)
 
 		if secret_json_files_paths:
-			inline_vars = ['`./venv/bin/python -m env_pipes vars_from_file --uppercase_vars {secret_files}`'.format(secret_files=' '.join([str(s) for s in secret_json_files_paths]))]
+			inline_vars = ['`./venv/bin/python -m devautotools env_vars_from_json --uppercase_vars {secret_files}`'.format(secret_files=' '.join([str(s) for s in secret_json_files_paths]))]
 		else:
 			inline_vars = []
 
