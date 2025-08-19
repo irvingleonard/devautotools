@@ -34,7 +34,7 @@ Would do the opposite of [start_local_docker_container](#start_local_docker_cont
 
 ## env_vars_from_ini
 
-Produces a string of `key="value"` based on the provided `ini` file data, to be used with the `env` command. This can be used to instantiate a container with variables stored on an `ini` file. There's an `uppercase_vars` switch to convert all the keys to uppercase, which is usually what you'll want. The separator (`sep`) parameter can be used to teplace the builtin space (` `) separator with anything else. 
+Produces a string of `key="value"` based on the provided `ini` file data, to be used with the `env` command. This can be used to instantiate a container with variables stored on an `ini` file. There's an `uppercase_vars` switch to convert all the keys to uppercase, which is usually what you'll want. The separator (`sep`) parameter can be used to replace the builtin space (` `) separator with anything else. 
 
 ## env_vars_from_json
 
