@@ -103,9 +103,11 @@ The third part of the system is a function able to "process" the settings for th
 
 Generally you'll create a `local_settings.py` file in your app and fill it with something like:
 ```
-from devautotools import django_settings_env_capture #Check the applicable section to understand its behavior
+#Check the django_settings_env_capture section to understand its behavior
+from devautotools import django_settings_env_capture, setting_is_true
 #...
-EXPECTED_VALUES_FROM_ENV = {} #Check the applicable section to learn how to populate this dict
+#Check the EXPECTED_VALUES_FROM_ENV section to learn how to populate this dict
+EXPECTED_VALUES_FROM_ENV = {}
 #...
 def common_settings(settings_globals, parent_callables=None):
 	"""Common values for Django
@@ -114,7 +116,6 @@ def common_settings(settings_globals, parent_callables=None):
 	global_state = globals()
 	global_state |= common_settings(globals())
 
-	:param settings_globals: the caller's "globals"
 	:param settings_globals: the caller's "globals"
 	:param parent_callables: an optional list of parent "common_settings" callables
 	:type parent_callables: [callable]|None
@@ -187,6 +188,10 @@ Again, as long as those functions followed the suggested boilerplate code and di
 
 As long as your `common_settings` functions followed the suggested boilerplate code and didn't do any destructive change (like removing stuff from `EXPECTED_VALUES_FROM_ENV`, `ENVIRONMENTAL_SETTINGS`, or `ENVIRONMENTAL_SETTINGS_KEYS`) you could mix recursive calls with iterative calls safely. The execution order will be important in the case of values overrides across functions or if you have a collision of `EXPECTED_VALUES_FROM_ENV` sections.
 
+### setting_is_true
+
+Utility function that compares the provided string to the known "true" values and returns and actual boolean.
+
 ### django_common_settings
 
 This module provides its own version of `common_settings` that covers very basic Django settings.
@@ -219,10 +224,10 @@ LOGGING = {
     },
 }
 ```
-- the `STORAGES`, `STATIC_URL`, and `STATIC_ROOT` values are configured with hardcoded values.
+- the `STORAGES`, `STATIC_URL`, and `STATIC_ROOT` values are configured with hardcoded values. The function will attempt to create these directories.
   - `default` storage goes to `<BASE_DIR>/storage/media`
   - `staticfiles` storage goes to `<BASE_DIR>/storage/staticfiles`
   - `staticfiles` path is set to `/static/`.
-- the database values could be supplied while prefixed with `DJANGO_DATABASE_` otherwise the builtin database (SQlite) will be used. Database `OPTIONS` should be prefixed with `DJANGO_DATABASE_OPTIONS_` and any of the file related options should be suffixed with `_base64` or `_content`. The content will be decoded first (in the case of `_base64`) and the copied to a temporary file in the default temp region (check [mkstemp's documentation](https://docs.python.org/3/library/tempfile.html#tempfile.mkstemp)) and used to configure the SSL settings for the database connection (possible option values are set in `SSL_FILE_OPTIONS`).
+- the database values could be supplied while prefixed with `DJANGO_DATABASE_` otherwise the builtin database (SQlite) will be used. Database `OPTIONS` should be prefixed with `DJANGO_DATABASE_OPTIONS_` and any of the file related options should be suffixed with `_path`, `_base64` or `_content`. The content will be decoded first (in the case of `_base64`) and the copied to a temporary file in the default temp region (check [mkstemp's documentation](https://docs.python.org/3/library/tempfile.html#tempfile.mkstemp)) or simply referenced in the case of `_path`, and used to configure the SSL settings for the database connection (possible option values are set in `SSL_FILE_OPTIONS`).
 
 All the variables that this function consumes are prefixed with `DJANGO_` which means that the content of `EXPECTED_VALUES_FROM_ENV` shouldn't affect it in any way.
