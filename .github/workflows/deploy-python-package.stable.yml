@@ -29,12 +29,7 @@ jobs:
 
       - name: Create Virtual Environment & Upgrade PIP
         run: |
-          python3 -m venv venv
-          ./venv/bin/pip install --upgrade pip
-
-      - name: Install Dependencies
-        run: |
-          ./venv/bin/pip install --upgrade simplifiedapp tomli
+          python3 deploy.py
 
       - name: Get Python Package Version
         id: get_package_version
@@ -46,9 +41,9 @@ jobs:
         id: check-tag
         run: |
           if [[ ! ${{ steps.get_package_version.outputs.PACKAGE_VERSION }} =~ ${{env.TAG_REGEX}} ]]; then
-            echo "Version found: ${{ steps.get_package_version.outputs.PACKAGE_VERSION }} is not a valid semver number for this environment"
+            echo "Version found: ${{ steps.get_package_version.outputs.PACKAGE_VERSION }} is not a valid semantic number for this environment"
             else 
-            echo "Version found: ${{ steps.get_package_version.outputs.PACKAGE_VERSION }} is a valid semver number for this environment"
+            echo "Version found: ${{ steps.get_package_version.outputs.PACKAGE_VERSION }} is a valid semantic number for this environment"
             echo "VALID_VERSION=true" >> $GITHUB_OUTPUT
           fi
 
@@ -96,16 +91,11 @@ jobs:
 
       - name: Create Virtual Environment & Upgrade PIP
         run: |
-          python3 -m venv venv
-          ./venv/bin/pip install --upgrade pip
+          python3 deploy.py
 
       - name: Install Build Modules
         run: |
           ./venv/bin/pip install --upgrade build
-
-      - name: Install Dependencies
-        run: |
-          ./venv/bin/pip install --upgrade simplifiedapp tomli
 
       - name: Build Package
         run: |
