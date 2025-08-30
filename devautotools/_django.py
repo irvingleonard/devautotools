@@ -3,20 +3,19 @@
 Some helper functionality around Django projects.
 """
 
-from atexit import register as atexit_register
 from base64 import b64decode
 from email.utils import getaddresses as parse_email_addresses
 from json import loads as json_loads
 from logging import getLogger
-from os import environ, getenv, remove as os_remove
+from os import environ, getenv
 from pathlib import Path
 from re import compile as re_compile, search as re_search, IGNORECASE as RE_IGNORECASE
 from shutil import rmtree
 from subprocess import run
-from tempfile import mkstemp
 from warnings import warn
 from webbrowser import open as webbrowser_open
 
+from ._tempfile import mkstemp
 from ._venv import deploy_local_venv
 
 LOGGER = getLogger(__name__)
@@ -110,7 +109,7 @@ def django_common_settings(settings_globals, parent_callables=None):
 		if database_options:
 			database_settings['OPTIONS'] = database_options
 		else:
-			warn('Potentially missing database SSL options; the connection could be insecure.')
+			warn('Potentially missing database SSL options; the connection could be insecure.', RuntimeWarning)
 		django_settings['DATABASES'] = {'default' : database_settings}
 	else:
 		warn('Not enough information to connect to an external database; using the builtin SQLite', RuntimeWarning)
@@ -251,9 +250,8 @@ def path_for_setting(django_settings, env_var_name, lowercase=False):
 		extra_mode, file_content = 'b', b64decode(django_settings['ENVIRONMENTAL_SETTINGS'][env_var_variations['base64']])
 	else:
 		return None
-
-	file_desc, file_path = mkstemp(text=True)
-	atexit_register(os_remove, file_path)
+	
+	file_desc, file_path = mkstemp(text=True, session=True)
 	with open(file_path, 'w'+extra_mode) as file_obj:
 		file_obj.write(file_content)
 
