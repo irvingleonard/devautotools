@@ -103,12 +103,10 @@ def django_common_settings(settings_globals, parent_callables=None):
 	database_settings, database_options = {}, {}
 	for key in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
 		if key[:24] == 'DJANGO_DATABASE_OPTIONS_':
-			local_key = key[24:]
-			setting_file_path = path_for_setting(django_settings=django_settings, env_var_name=local_key, lowercase=True)
-			database_options[local_key] = setting_file_path
+			setting_file_path = path_for_setting(django_settings=django_settings, env_var_name=key, lowercase=True)
+			database_options[key[24:]] = setting_file_path
 		elif key[:16] == 'DJANGO_DATABASE_':
-			local_key = key[16:]
-			database_settings[local_key] = django_settings['ENVIRONMENTAL_SETTINGS'][local_key]
+			database_settings[key[16:]] = django_settings['ENVIRONMENTAL_SETTINGS'][key]
 	if database_settings:
 		if database_options:
 			database_settings['OPTIONS'] = database_options
