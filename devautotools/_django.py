@@ -5,6 +5,7 @@ Some helper functionality around Django projects.
 
 from atexit import register as atexit_register
 from base64 import b64decode
+from email.utils import getaddresses as parse_email_addresses
 from json import loads as json_loads
 from logging import getLogger
 from os import environ, getenv, remove as os_remove
@@ -21,8 +22,8 @@ from ._venv import deploy_local_venv
 LOGGER = getLogger(__name__)
 POSSIBLE_LOG_LEVELS = ('INFO', 'CRITICAL', 'ERROR', 'WARNING', 'DEBUG')
 REQUIRED_SECTION_RE = re_compile(r'(:?.+_required)|(:?required_.+)', RE_IGNORECASE)
-SSL_FILE_OPTIONS = ('sslcert', 'sslkey', 'sslrootcert')
 TRUTH_LOWERCASE_STRING_VALUES = ('true', 'yes', 'on', '1')
+
 
 def django_common_settings(settings_globals, parent_callables=None):
 	"""Common values for Django
@@ -103,41 +104,72 @@ def django_common_settings(settings_globals, parent_callables=None):
 	for key in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
 		if key[:24] == 'DJANGO_DATABASE_OPTIONS_':
 			local_key = key[24:]
-			database_options[local_key.lower()] = django_settings['ENVIRONMENTAL_SETTINGS'][local_key]
+			setting_file_path = path_for_setting(django_settings=django_settings, env_var_name=local_key, lowercase=True)
+			database_options[local_key] = setting_file_path
 		elif key[:16] == 'DJANGO_DATABASE_':
 			local_key = key[16:]
 			database_settings[local_key] = django_settings['ENVIRONMENTAL_SETTINGS'][local_key]
 	if database_settings:
 		if database_options:
-			for key in list(database_options.keys()):
-				if key.rstrip('_base64').rstrip('_content').rstrip('_path') in SSL_FILE_OPTIONS:
-					if key[-5:] == '_path':
-						clean_key = key[:-5]
-						file_content = None
-						file_path = database_options[key]
-					elif key[-7:] == '_base64':
-						clean_key = key[:-7]
-						file_content = b64decode(django_settings['ENVIRONMENTAL_SETTINGS'][key]).decode()
-					elif key[-8:] == '_content':
-						clean_key = key[:-8]
-						file_content = django_settings['ENVIRONMENTAL_SETTINGS'][key]
-					else:
-						warn(f'Unknown Database SSL file option variation: {key}', RuntimeWarning)
-						continue
-					if file_content is not None:
-						file_desc, file_path = mkstemp(text=True)
-						atexit_register(os_remove, file_path)
-						with open(file_path, 'wt') as file_obj:
-							file_obj.write(file_content)
-					database_options[clean_key] = file_path
 			database_settings['OPTIONS'] = database_options
 		else:
-			warn(f'Potentially missing database SSL options; the connection could be insecure: {SSL_FILE_OPTIONS}')
+			warn('Potentially missing database SSL options; the connection could be insecure.')
 		django_settings['DATABASES'] = {'default' : database_settings}
 	else:
 		warn('Not enough information to connect to an external database; using the builtin SQLite', RuntimeWarning)
 
+	if 'DJANGO_EMAIL_BACKEND' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_BACKEND'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_BACKEND']
+	if 'DJANGO_EMAIL_HOST' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_HOST'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_HOST']
+	if 'DJANGO_EMAIL_PORT' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_PORT'] = int(django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_PORT'])
+	if 'DJANGO_EMAIL_TIMEOUT' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_TIMEOUT'] = int(django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_TIMEOUT'])
+	if 'DJANGO_EMAIL_USE_SSL' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_USE_SSL'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_USE_SSL'])
+	if (('EMAIL_USE_SSL' not in django_settings) or not django_settings['EMAIL_USE_SSL']) and ('DJANGO_EMAIL_USE_TLS' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']):
+		django_settings['EMAIL_USE_TLS'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_USE_TLS'])
+	if 'DJANGO_EMAIL_FILE_PATH' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_FILE_PATH'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_FILE_PATH']
+
+	if 'DJANGO_EMAIL_HOST_USER' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_HOST_USER'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_HOST_USER']
+	if 'DJANGO_EMAIL_HOST_PASSWORD' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_HOST_PASSWORD'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_HOST_PASSWORD']
+	django_email_ssl_certfile = path_for_setting(django_settings=django_settings, env_var_name='DJANGO_EMAIL_SSL_CERTFILE')
+	if django_email_ssl_certfile is not None:
+		django_settings['EMAIL_SSL_CERTFILE'] = django_email_ssl_certfile
+	django_email_ssl_keyfile = path_for_setting(django_settings=django_settings, env_var_name='DJANGO_EMAIL_SSL_KEYFILE')
+	if django_email_ssl_keyfile is not None:
+		django_settings['EMAIL_SSL_KEYFILE'] = django_email_ssl_keyfile
+
+	server_email = django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_SERVER_EMAIL', '')
+	default_from_email = django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_DEFAULT_FROM_EMAIL', '')
+	if server_email and default_from_email:
+		django_settings['SERVER_EMAIL'] = server_email
+		django_settings['DEFAULT_FROM_EMAIL'] = default_from_email
+	elif server_email:
+		django_settings['SERVER_EMAIL'] = django_settings['DEFAULT_FROM_EMAIL'] = server_email
+	elif default_from_email:
+		django_settings['SERVER_EMAIL'] = django_settings['DEFAULT_FROM_EMAIL'] = default_from_email
+	admin_addresses = parse_email_addresses(django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_ADMINS', ''))
+	manager_addresses = parse_email_addresses(django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_MANAGERS', ''))
+	if admin_addresses and manager_addresses:
+		django_settings['ADMINS'] = admin_addresses
+		django_settings['MANAGERS'] = manager_addresses
+	elif admin_addresses:
+		django_settings['ADMINS'] = django_settings['MANAGERS'] = admin_addresses
+	elif manager_addresses:
+		django_settings['ADMINS'] = django_settings['MANAGERS'] = manager_addresses
+
+	if 'DJANGO_EMAIL_SUBJECT_PREFIX' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_SUBJECT_PREFIX'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_SUBJECT_PREFIX'])
+	if 'DJANGO_EMAIL_USE_LOCALTIME' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_USE_LOCALTIME'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_USE_LOCALTIME'])
+
 	return django_settings
+
 
 def deploy_local_django_site(*secret_json_files_paths, dev_from_pypi=False, venv_options={}, pip_install_options={}, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', just_build=False):
 	"""Deploy a local Django site
@@ -190,6 +222,47 @@ def django_settings_env_capture(**expected_sections):
 
 	return environmental_settings
 
+
+def path_for_setting(django_settings, env_var_name, lowercase=False):
+	"""Path for a setting
+	Given an environment variable name, find the correct value for the corresponding setting. The setting name would be the base name. The logic is:
+	1. if the env_var_name is found, it's returned as is. This is usually the case when the file is managed outside and the path is provided to Django.
+	2. if env_var_name + "_CONTENT" is found (ex: FOO_CONTENT) then the content of the variable is written to a temporary file and the path to such file is returned.
+	3. if env_var_name + "_BASE64" is found (ex: FOO_BASE64) then the content of the variable is base64 decoded, then written to a temporary file, and the path to such file is returned. You can provide binary content using this method but keep in mind the buffer limits of your operating system.
+	The file is created using "mkstemp" and any related limitations and security considerations apply. The file is automatically removed when the Python interpreter ends (atexit + os.remove).
+
+	:param django_settings: the global variables from the original settings.py file
+	:type django_settings: dict
+	:param env_var_name: the name of the environment variable to look for
+	:type env_var_name: str
+	:param lowercase: if the variations suffixes should be lowercase
+	:type lowercase: bool
+	:return: The path for the setting
+	:rtype: any
+	"""
+
+	env_var_variations = {
+		'content': env_var_name + ('_content' if lowercase else '_CONTENT'),
+		'base64': env_var_name + ('_base64' if lowercase else '_BASE64'),
+	}
+
+	if env_var_name in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		return django_settings['ENVIRONMENTAL_SETTINGS'][env_var_name]
+	elif env_var_variations['content'] in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		extra_mode, file_content = 't', django_settings['ENVIRONMENTAL_SETTINGS'][env_var_variations['content']]
+	elif env_var_variations['base64'] in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		extra_mode, file_content = 'b', b64decode(django_settings['ENVIRONMENTAL_SETTINGS'][env_var_variations['base64']])
+	else:
+		return None
+
+	file_desc, file_path = mkstemp(text=True)
+	atexit_register(os_remove, file_path)
+	with open(file_path, 'w'+extra_mode) as file_obj:
+		file_obj.write(file_content)
+
+	return file_path
+
+
 def setting_is_true(value):
 	"""Setting is True
 	Compares the provided string to the known "truth" values. Uses the list in TRUTH_LOWERCASE_STRING_VALUES.
@@ -199,6 +272,7 @@ def setting_is_true(value):
 	"""
 
 	return value.strip().lower() in TRUTH_LOWERCASE_STRING_VALUES
+
 
 class DjangoLinkedSite:
 	"""Django linked site
