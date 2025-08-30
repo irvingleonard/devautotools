@@ -451,6 +451,7 @@ class DjangoLinkedSite:
 
 		if len(superuser_password):
 			current_user = run(('whoami',), capture_output=True, text=True).stdout.strip('\n')
+			current_user = current_user.split('\\')[-1]
 			super_user_details = {
 				'DJANGO_SUPERUSER_LOGIN': current_user,
 				'DJANGO_SUPERUSER_FIRSTNAME': current_user,
