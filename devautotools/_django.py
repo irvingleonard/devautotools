@@ -486,23 +486,18 @@ class DjangoLinkedSite:
 		if len(superuser_password):
 			current_user = run(('whoami',), capture_output=True, text=True).stdout.strip('\n')
 			current_user = current_user.split('\\')[-1]
+			username_parameter_name = environ.get('DJANGO_CREATESUPERUSER_USERNAME', 'username')
+			email_parameter_name = environ.get('DJANGO_CREATESUPERUSER_EMAIL', 'email')
+
 			super_user_details = {
+				f'DJANGO_SUPERUSER_{username_parameter_name.upper()}': current_user,
 				'DJANGO_SUPERUSER_FIRSTNAME': current_user,
 				'DJANGO_SUPERUSER_LASTNAME': current_user,
+				f'DJANGO_SUPERUSER_{email_parameter_name.upper()}': f'{current_user}@example.local',
 				'DJANGO_SUPERUSER_PASSWORD': superuser_password,
 			}
-			params = (
-				str(self.manage_py),
-				'createsuperuser',
-				'--noinput',
-				'--username',
-				current_user,
-				'--email',
-				f'{current_user}@example.local',
-				f'--settings={self.site_name}.local_settings',
-			)
 			LOGGER.info('Creating the super user: %s', current_user)
-			self.venv(*params, env=environ|environment_content|super_user_details)
+			self.venv(str(self.manage_py), 'createsuperuser', '--noinput', f'--settings={self.site_name}.local_settings', env=environ|environment_content|super_user_details)
 			return current_user, superuser_password
 
 	def start(self, *secret_json_files_paths):
