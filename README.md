@@ -46,7 +46,7 @@ This module proposes a normalized system to handle Django settings by loading fr
 
 ## The settings module
 
-There should be a settings module (that could be named anything you want) which should contain several things. Generally you'll create a `local_settings.py` file in your app and fill it with something like:
+There should be a settings module (that could be named anything you want) which should contain several things. Generally you'll create a `settings.py` file in your app and fill it with something like:
 ```
 #You should probably check these functions' documentation (these are completely optional)
 from devautotools import path_for_setting, setting_is_true
@@ -180,8 +180,8 @@ from devautotools import django_normalized_settings
 
 settings_module_names = (
     'devautotools',
-    'foo.local_settings',
-    'bar.local_settings',
+    'foo.settings',
+    'bar.settings',
 )
 global_state = globals()
 global_state |= django_normalized_settings(*settings_module_names, django_settings=globals())
