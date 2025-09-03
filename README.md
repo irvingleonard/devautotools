@@ -40,13 +40,51 @@ Produces a string of `key="value"` based on the provided `ini` file data, to be 
 
 Produces a string of `key="value"` based on the provided `json` file data, to be used with the `env` command. This can be used to instantiate a container with variables stored on a `json` file. It has the same `uppercase_vars` and `sep` parameters, as [`env_vars_from_ini`](#env_vars_from_ini). The values will be cast to string, so, complex structures might be unable to be used this way.
 
-## Normalized Django settings system
+# Normalized Django settings system
 
-This module proposes a normalized system to handle Django settings loading from the environment.
+This module proposes a normalized system to handle Django settings loading from the environment. 
+
+## The settings module
+
+There should be a `settings` module (that could be named anything you want) which should contain several things. Generally you'll create a `local_settings.py` file in your app and fill it with something like:
+```
+#You should probably check these function's documentation (these are completely optional)
+from devautotools import path_for_setting, setting_is_true
+
+#...
+
+#Check the EXPECTED_VALUES_FROM_ENV section to learn how to populate this dict. Example content could be
+#EXPECTED_VALUES_FROM_ENV = {
+#    'EXAMPLE_SECTION': {
+#        'FOO',
+#        'IS_BAR',
+#        'SPAM',
+#    }
+#    'OMELETTE_SECTION': {
+#        'EGGS',
+#        'HAM',
+#    }
+#}
+EXPECTED_VALUES_FROM_ENV = {}
+
+#Check the IMPLICIT_ENVIRONMENTAL_SETTINGS section to learn how to populate this dict. Example content could be
+#IMPLICIT_ENVIRONMENTAL_SETTINGS = {
+#    'FOO': 'omelette',
+#    'IS_BAR': 'yes',
+#}
+IMPLICIT_ENVIRONMENTAL_SETTINGS = {}
+
+#...
+
+def normalized_settings(**django_settings):
+	
+	#Your configuration logic goes here
+	pass
+```
 
 ### EXPECTED_VALUES_FROM_ENV
 
-It starts by defining a setting called `EXPECTED_VALUES_FROM_ENV` which is a dictionary of `section: {names}`. The structure for the expected values is:
+This is a dictionary of `section: {names}` where each "name" would be a variable to be captured from the environment. The structure for the expected values is:
 ```
 EXPECTED_VALUES_FROM_ENV = {
     THIS_IS_AN_OPTIONAL_SECTION = {
@@ -70,153 +108,96 @@ EXPECTED_VALUES_FROM_ENV = {
     }
 }
 ```
-The section can be named in any way you want but a good naming convention should be used to avoid collisions when merging different apps.
+The section can be named in any way you want but a good naming convention should be used to avoid collisions when merging different modules.
 
-The sections enable you to handle multiple settings at a time, simplifying the group check with the use of set logic against the list of all the loaded settings (which should live in `ENVIRONMENTAL_SETTINGS_KEYS`).
-
-Ex: let's say that some settings `foo_user` and `foo_password` can be provided to enable some functionality `foo`, but it only makes sense if both are provided together (providing only one wouldn't work). In such case you could do:
+The sections enable you to handle multiple settings at a time, simplifying the group check with the use of set logic against the list of all the loaded settings (which should live in `ENVIRONMENTAL_SETTINGS_KEYS`). Ex: let's say that some settings `foo_user` and `foo_password` can be provided to enable some functionality `foo`, but it only makes sense if both are provided together (providing only one wouldn't work). In such case you could do:
 ```
 EXPECTED_VALUES_FROM_ENV = {
-    'FOO_OPTIONALS' : {
+    'FOO' : {
         'foo_user',
         'foo_password',
     }
 }
 
-...
+#...
 
-if EXPECTED_VALUES_FROM_ENV['FOO_OPTIONALS'].issubset(ENVIRONMENTAL_SETTINGS_KEYS):
+#Then in your "normalized_settings" function you could do
+if EXPECTED_VALUES_FROM_ENV['FOO'].issubset(ENVIRONMENTAL_SETTINGS_KEYS):
     #configure foo
 else:
-    warn('foo is not fingured')
+    warn('foo is not configured')
 ```
 
-### django_settings_env_capture(**expected_sections)
+### IMPLICIT_ENVIRONMENTAL_SETTINGS
 
-Is a utilitarian function that will scan the environmental variables and pick the ones described in the `expected_sections` parameter or anything that starts with `DJANGO_`.
-
-If you start the section name with `required_` or end it with `_required` (case-insensitive) they will be considered a requirement and failure to load all its variables from the environment will raise a `RuntimeError`. Variable names will be used "as is" to pull the variable from the environment (watch the case, no conversion is done). It will generate a warning for all the variables in the `expected_sections` that it couldn't find. The result will be a dict of `variable_name: variable_value`.
-
-### settings.common_settings
-
-The third part of the system is a function able to "process" the settings for the app in question. It should know about all the sections and produce the expected values based on the provided variables.
-
-Generally you'll create a `local_settings.py` file in your app and fill it with something like:
+This is an optional constant that can be used to provide "default" values to any environmental variable. It's a simple dictionary having `name: value` which will be added to the captured values during the processing. Ex:
 ```
-#Check the functions documentation to get a feel of how the low level stuff works
-from devautotools import django_settings_env_capture, path_for_setting, setting_is_true
-#...
-#Check the EXPECTED_VALUES_FROM_ENV section to learn how to populate this dict. Example content could be
-#EXPECTED_VALUES_FROM_ENV = {
-#    'EXAMPLE_SECTION': {
-#        'FOO',
-#        'IS_BAR',
-#        'SPAM',
-#    }
-#    'OMELETTE_SECTION': {
-#        'EGGS',
-#        'HAM',
-#    }
-#}
-EXPECTED_VALUES_FROM_ENV = {}
-#...
-def common_settings(settings_globals, parent_callables=None):
-	"""Common values for Django
-	Generates Django values for your settings.py file. It's usually added as:
-
-	global_state = globals()
-	global_state |= common_settings(globals())
-
-	:param settings_globals: the caller's "globals"
-	:param parent_callables: an optional list of parent "common_settings" callables
-	:type parent_callables: [callable]|None
-	:return: new content for "globals"
-	"""
-
-	django_settings = settings_globals.copy()
-
-	if 'EXPECTED_VALUES_FROM_ENV' not in django_settings:
-		django_settings['EXPECTED_VALUES_FROM_ENV'] = {}
-	django_settings['EXPECTED_VALUES_FROM_ENV'] |= EXPECTED_VALUES_FROM_ENV
-
-	if parent_callables is None:
-		if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
-			django_settings['ENVIRONMENTAL_SETTINGS'] = {}
-		django_settings['ENVIRONMENTAL_SETTINGS'] |= django_settings_env_capture(**EXPECTED_VALUES_FROM_ENV)
-		django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
-	elif parent_callables:
-		parent_common_settings = parent_callables.pop(0)
-		django_settings = parent_common_settings(django_settings, parent_callables=parent_callables)
-	else:
-		if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
-			django_settings['ENVIRONMENTAL_SETTINGS'] = {}
-		django_settings['ENVIRONMENTAL_SETTINGS'] |= django_settings_env_capture(**django_settings['EXPECTED_VALUES_FROM_ENV'])
-		django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
-	
-	#Start configuring stuff here, pulling the values from django_settings['ENVIRONMENTAL_SETTINGS']. Ex:
-	#if 'FOO' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
-	#    django_settings['foo'] = django_settings['ENVIRONMENTAL_SETTINGS']['FOO']
-	#
-	#You can leverage "setting_is_true" for booleans
-	#if 'IS_BAR' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
-	#    django_settings['is_bar'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS']['IS_BAR'])
-	#
-	#The "path_for_setting" function is available for settings expecting a path (you can provide the content too; check the function's documentation for details)
-	#spam = path_for_setting(django_settings, 'SPAM')
-	#if spam is not None:
-	#    django_settings['spam'] = spam
-	#
-	#You can also use your sections and django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] to handle multiple settings at a time.
-	#if EXPECTED_VALUES_FROM_ENV['OMELETTE_SECTION'].issubset(django_settings['ENVIRONMENTAL_SETTINGS_KEYS']):
-	#    django_settings['ham_omelette'] = (django_settings['ENVIRONMENTAL_SETTINGS']['EGGS'], django_settings['ENVIRONMENTAL_SETTINGS']['HAM'])
+IMPLICIT_ENVIRONMENTAL_SETTINGS = {
+  'FOO_BAR' : 'this or that',
+  'spam': 'no: ham & eggs',
+}
 ```
-Your configuration code shouldn't edit `EXPECTED_VALUES_FROM_ENV`, `ENVIRONMENTAL_SETTINGS`, or `ENVIRONMENTAL_SETTINGS_KEYS` otherwise it could destroy the ability of the function to work alongside their siblings.
+You can use it to provide defaults across apps (modules).
 
-This logic will set `EXPECTED_VALUES_FROM_ENV` to an empty dict if not present. All the values loaded will be added to a dict `ENVIRONMENTAL_SETTINGS` which is initialized if it doesn't exist already. It will also create or re-create a frozenset `ENVIRONMENTAL_SETTINGS_KEYS` out of the `ENVIRONMENTAL_SETTINGS` keys.
+### normalized_settings(**django_settings)
 
-Then there are different ways to use this function:
-
-#### Iteratively 
-
-In this case each `common_settings` parses the whole environment by itself looking only for the variables that apply to it. Using multiple of these together is quite straightforward, by making the project's `settings.py` look like this:
+This is a function able to "process" the settings for the app in question. It should know about all the sections and produce the expected values based on the provided variables. It must return the updated `django_settings`. Ex:
 ```
-from devautotools import django_common_settings
-from foo.settings import common_settings as foo_common_settings
-from bar.settings import common_settings as bar_common_settings
+if 'FOO' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+    django_settings['foo'] = django_settings['ENVIRONMENTAL_SETTINGS']['FOO']
+
+#You can leverage "setting_is_true" for booleans
+if 'IS_BAR' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+    django_settings['is_bar'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS']['IS_BAR'])
+
+#The "path_for_setting" function is available for settings expecting a path (you can provide the content too; check the function's documentation for details)
+spam = path_for_setting(django_settings, 'SPAM')
+if spam is not None:
+    django_settings['spam'] = spam
+
+#You can also use your sections and django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] to handle multiple settings at a time.
+if EXPECTED_VALUES_FROM_ENV['OMELETTE_SECTION'].issubset(django_settings['ENVIRONMENTAL_SETTINGS_KEYS']):
+    django_settings['ham_omelette'] = (django_settings['ENVIRONMENTAL_SETTINGS']['EGGS'], django_settings['ENVIRONMENTAL_SETTINGS']['HAM'])
+
+return django_settings
+```
+You shouldn't pull defaults directly in this function, something like `django_settings['foo'] = django_settings['ENVIRONMENTAL_SETTINGS'].get('FOO', 'spam')` is not good, you should instead use the [`IMPLICIT_ENVIRONMENTAL_SETTINGS`](#IMPLICIT_ENVIRONMENTAL_SETTINGS) constant:
+```
+IMPLICIT_ENVIRONMENTAL_SETTINGS = {
+  'FOO': 'spam',
+}
+```
+This allows every `normalized_settings` function to "know" about the default value for each variable.
+
+## django_normalized_settings(*settings_module_names, django_settings, loose_list=True)
+
+In your Django site's settings you should trigger the system by calling this function. It's usually used as:
+```
+from devautotools import django_normalized_settings
 
 #...
 
+settings_module_names = (
+    'devautotools',
+    'foo.settings',
+    'bar.settings',
+)
 global_state = globals()
-global_state |= django_common_settings(globals())
-global_state |= foo_common_settings(globals())
-global_state |= bar_common_settings(globals())
+global_state |= django_normalized_settings(*settings_module_names, django_settings=globals())
 ```
-As long as those functions followed the suggested boilerplate code and didn't do any destructive change (like removing stuff from `EXPECTED_VALUES_FROM_ENV`, `ENVIRONMENTAL_SETTINGS`, or `ENVIRONMENTAL_SETTINGS_KEYS`) you should get the same result regardless of the order in which you call them (unless you override values across functions or if you have a collision of `EXPECTED_VALUES_FROM_ENV` sections).
+Each value in `settings_module_names` should be an importable module potentially containing `EXPECTED_VALUES_FROM_ENV`, `IMPLICIT_ENVIRONMENTAL_SETTINGS`, and/or `common_settings`.
 
-#### Recursively
+The `loose_list` parameter can be set to avoid aborting the execution if any of the modules fails to load; it will generate an exception log instead and continue the execution.
 
-You could "simplify" the calling via recursion, in which case the environment is only parsed once. This way, each layer adds its sections to `EXPECTED_VALUES_FROM_ENV` until it reaches the deepest one which calls `django_settings_env_capture`. On the way back, each layer process the values in `ENVIRONMENTAL_SETTINGS` and adds its own settings. In this scenario, the project's `settings.py` would look like this:
-```
-from devautotools import django_common_settings
-from foo.settings import common_settings as foo_common_settings
-from bar.settings import common_settings as bar_common_settings
+It will leverage [`django_settings_env_capture`](#django_settings_env_captureexpected_sections) to load the variables from the environment and its rules apply.
 
-#...
+## Utility functions
 
-global_state = globals()
-global_state |= bar_common_settings(globals(), parent_callables=[foo_common_settings,django_common_settings])
-```
-In this arrangement the execution will occur in the same order as the previous section. It always goes from deep to shallow.
-
-Again, as long as those functions followed the suggested boilerplate code and didn't do any destructive change (like removing stuff from `EXPECTED_VALUES_FROM_ENV`, `ENVIRONMENTAL_SETTINGS`, or `ENVIRONMENTAL_SETTINGS_KEYS`) you should get the same result regardless of the order in which you call them (unless you override values across functions or if you have a collision of `EXPECTED_VALUES_FROM_ENV` sections).
-
-#### Mixed
-
-As long as your `common_settings` functions followed the suggested boilerplate code and didn't do any destructive change (like removing stuff from `EXPECTED_VALUES_FROM_ENV`, `ENVIRONMENTAL_SETTINGS`, or `ENVIRONMENTAL_SETTINGS_KEYS`) you could mix recursive calls with iterative calls safely. The execution order will be important in the case of values overrides across functions or if you have a collision of `EXPECTED_VALUES_FROM_ENV` sections.
+These are some functions that you can leverage on your `normalized_settings`' logic.
 
 ### setting_is_true(value)
 
-Utility function that compares the provided string (`value`) to the known "true" values (the `TRUTH_LOWERCASE_STRING_VALUES` constant) in a case-insensitive way and returns and actual boolean.
+It compares the provided string (`value`) to the known "true" values (the `TRUTH_LOWERCASE_STRING_VALUES` constant) in a case-insensitive way and returns and actual boolean.
 
 ### path_for_setting(django_settings, env_var_name, lowercase=False)
 
@@ -228,9 +209,11 @@ Given an environment variable name, find the correct value for the corresponding
 
 The file is created using [mkstemp](https://docs.python.org/3/library/tempfile.html#tempfile.mkstemp) and any related limitations or security considerations apply. The file is automatically removed when the Python interpreter ends using [atexit](https://docs.python.org/3/library/atexit.html) + [os.remove](https://docs.python.org/3/library/os.html#os.remove).
 
-### django_common_settings(settings_globals, parent_callables=None)
+The `lowercase` parameter, if provided, makes the function create the `env_var_name`'s variations with the suffixes in lowercase (instead of the default uppercase).
 
-This module provides its own version of `common_settings` that covers very basic Django settings.
+## Local normalized_settings
+
+This module provides its own version of `normalized_settings` that covers very basic Django settings for your convenience.
 
 It requires the value of `BASE_DIR` to be set:
 - If you extend the builtin/autogenerated `settings.py` by doing `from settings import *` in your custom settings module (with a different name than `settings`) or simply adding more values to the original `settings.py`, then you don't have to worry about this, Django already sets the value.
@@ -275,3 +258,9 @@ LOGGING = {
 - The email addresses of admins and managers are provided via [`DJANGO_ADMINS`](https://docs.djangoproject.com/en/stable/ref/settings/#admins) and [`DJANGO_MANAGERS`](https://docs.djangoproject.com/en/stable/ref/settings/#managers). Its content is parsed using [`getaddresses`](https://docs.python.org/3/library/email.utils.html#email.utils.getaddresses). If both values are provided then each will go to the corresponding setting. If only one is provided, then both settings will be populated with that value.
 
 All the variables that this function consumes are prefixed with `DJANGO_` which means that it doesn't require entries in `EXPECTED_VALUES_FROM_ENV`.
+
+## django_settings_env_capture(**expected_sections)
+
+This is an internal utilitarian function that will scan the environmental variables and pick the ones described in the `expected_sections` parameter or anything that starts with `DJANGO_`.
+
+If you start the section name with `required_` or end it with `_required` (case-insensitive) they will be considered a requirement and failure to load all its variables from the environment will raise a `RuntimeError`. Variable names will be used "as is" to pull the variable from the environment (watch the case, no conversion is done). It will generate a warning for all the variables in the `expected_sections` that it couldn't find. The result will be a dict of `variable_name: variable_value`.

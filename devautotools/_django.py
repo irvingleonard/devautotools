@@ -5,6 +5,7 @@ Some helper functionality around Django projects.
 
 from base64 import b64decode
 from email.utils import getaddresses as parse_email_addresses
+from importlib import import_module
 from json import loads as json_loads
 from logging import getLogger
 from os import environ, getenv
@@ -24,37 +25,120 @@ REQUIRED_SECTION_RE = re_compile(r'(:?.+_required)|(:?required_.+)', RE_IGNORECA
 TRUTH_LOWERCASE_STRING_VALUES = ('true', 'yes', 'on', '1')
 
 
-def django_common_settings(settings_globals, parent_callables=None):
-	"""Common values for Django
-	Generates Django values for your settings.py file. It's usually added as:
-
-	global_state = globals()
-	global_state |= django_common_settings(globals())
-
-	:param settings_globals: the caller's "globals"
-	:param parent_callables: an optional list of parent "common_settings" callables
-	:type parent_callables: [callable]|None
-	:return: new content for "globals"
+def deploy_local_django_site(*secret_json_files_paths, dev_from_pypi=False, venv_options={}, pip_install_options={}, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', just_build=False):
+	"""Deploy a local Django site
+	Starts by deploying a new virtual environment via "deploy_local_env()" and then creates a test site with symlinks to the existing project files. It runs the test server until it gets stopped (usually with ctrl + c).
 	"""
 
-	django_settings = settings_globals.copy()
+	return DjangoLinkedSite.deploy_locally(*secret_json_files_paths, django_site_name=django_site_name, extra_paths_to_link=extra_paths_to_link, create_cache_table=create_cache_table, superuser_password=superuser_password, dev_from_pypi=dev_from_pypi, venv_options=venv_options, pip_install_options=pip_install_options, just_build=just_build)
 
+
+def django_normalized_settings(*settings_module_names, django_settings, loose_list=False):
+	"""Normalized Django settings system workhorse
+	The interface to use the normalized Django settings system. It's usually added as:
+
+	settings_module_names = (
+		'devautotools',
+		'foo.settings',
+		'bar.settings',
+	)
+	global_state = globals()
+	global_state |= django_normalized_settings(*settings_module_names, django_settings=globals())
+
+	The modules will be processed in the provided order, so value overrides if present will apply in the same order.
+
+	:param settings_module_names: module names to load; each of them could include "EXPECTED_VALUES_FROM_ENV" and "IMPLICIT_ENVIRONMENTAL_SETTINGS" constants and a "common_settings" callable.
+	:type settings_module_names: str
+	:param django_settings: usually the "globals()" from the calling settings.py
+	:type django_settings: Any
+	:param loose_list: will not stop execution when it fails to load a "settings_module" if False
+	:type loose_list: bool
+	"""
+
+	settings_modules = []
+	for module_name in settings_module_names:
+		try:
+			if isinstance(module_name, str):
+				settings_modules.append(import_module(module_name))
+			else:
+				settings_modules.append(import_module(*module_name))
+		except ImportError:
+			if loose_list:
+				LOGGER.exception("Couldn't load settings module: %s", module_name)
+			else:
+				raise
+
+	django_settings = django_settings.copy()
 	if 'EXPECTED_VALUES_FROM_ENV' not in django_settings:
 		django_settings['EXPECTED_VALUES_FROM_ENV'] = {}
+	if 'IMPLICIT_ENVIRONMENTAL_SETTINGS' not in django_settings:
+		django_settings['IMPLICIT_ENVIRONMENTAL_SETTINGS'] = {}
+	for settings_module in settings_modules:
+		django_settings['EXPECTED_VALUES_FROM_ENV'] |= getattr(settings_module, 'EXPECTED_VALUES_FROM_ENV', {})
+		django_settings['IMPLICIT_ENVIRONMENTAL_SETTINGS'] |= getattr(settings_module, 'IMPLICIT_ENVIRONMENTAL_SETTINGS', {})
 
-	if parent_callables is None:
-		if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
-			django_settings['ENVIRONMENTAL_SETTINGS'] = {}
-		django_settings['ENVIRONMENTAL_SETTINGS'] |= django_settings_env_capture()
-		django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
-	elif parent_callables:
-		parent_common_settings = parent_callables.pop(0)
-		django_settings = parent_common_settings(django_settings, parent_callables=parent_callables)
-	else:
-		if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
-			django_settings['ENVIRONMENTAL_SETTINGS'] = {}
-		django_settings['ENVIRONMENTAL_SETTINGS'] |= django_settings_env_capture(**django_settings['EXPECTED_VALUES_FROM_ENV'])
-		django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
+	django_settings['ENVIRONMENTAL_SETTINGS'] |= django_settings['IMPLICIT_ENVIRONMENTAL_SETTINGS'].copy() | django_settings_env_capture(**django_settings['EXPECTED_VALUES_FROM_ENV'])
+	for settings_module in settings_modules:
+		if hasattr(settings_module, 'common_settings'):
+			django_settings = getattr(settings_module, 'common_settings')(**django_settings)
+
+	django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
+
+	return django_settings
+
+
+def django_settings_env_capture(**expected_sections):
+	"""Capture Django settings
+	Parses the current environment and collect variables applicable to the Django site.
+
+	:param expected_sections:
+	:type expected_sections:
+	:return:
+	:rtype:
+	"""
+
+	required_expected_sections, optional_expected_sections = set(), set()
+	for expected_section in expected_sections:
+		if re_search(REQUIRED_SECTION_RE, expected_section) is None:
+			optional_expected_sections.add(expected_section)
+		else:
+			required_expected_sections.add(expected_section)
+	environmental_settings, missing_setting_from_env = {}, []
+
+	for required_section in required_expected_sections:
+		for required_setting in expected_sections[required_section]:
+			required_setting_value = getenv(required_setting, '')
+			if len(required_setting_value):
+				environmental_settings[required_setting] = required_setting_value
+			else:
+				missing_setting_from_env.append(required_setting)
+	if len(missing_setting_from_env):
+		raise RuntimeError(f'Missing required settings from env: {missing_setting_from_env}')
+
+	for optional_section in optional_expected_sections:
+		for optional_setting in expected_sections[optional_section]:
+			optional_setting_value = getenv(optional_setting, '')
+			if len(optional_setting_value):
+				environmental_settings[optional_setting] = optional_setting_value
+			else:
+				missing_setting_from_env.append(optional_setting)
+	if len(missing_setting_from_env):
+		warn(f'Missing optional settings from env: {missing_setting_from_env}', RuntimeWarning)
+	for key, value in environ.items():
+		if key[:7] == 'DJANGO_':
+			environmental_settings[key] = value
+
+	return environmental_settings
+
+
+def normalized_settings(**django_settings):
+	"""Common values for Django
+	Generates basic values for your Django settings.py file.
+
+	:param django_settings: the current Django settings collection (ultimately the content of globals())
+	:type django_settings: Any
+	:return: new content for Django settings
+	"""
 
 	django_settings['DEBUG'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_DEBUG', ''))
 
@@ -165,58 +249,6 @@ def django_common_settings(settings_globals, parent_callables=None):
 		django_settings['EMAIL_USE_LOCALTIME'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_USE_LOCALTIME'])
 
 	return django_settings
-
-
-def deploy_local_django_site(*secret_json_files_paths, dev_from_pypi=False, venv_options={}, pip_install_options={}, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', just_build=False):
-	"""Deploy a local Django site
-	Starts by deploying a new virtual environment via "deploy_local_env()" and then creates a test site with symlinks to the existing project files. It runs the test server until it gets stopped (usually with ctrl + c).
-	"""
-
-	return DjangoLinkedSite.deploy_locally(*secret_json_files_paths, django_site_name=django_site_name, extra_paths_to_link=extra_paths_to_link, create_cache_table=create_cache_table, superuser_password=superuser_password, dev_from_pypi=dev_from_pypi, venv_options=venv_options, pip_install_options=pip_install_options, just_build=just_build)
-
-
-def django_settings_env_capture(**expected_sections):
-	"""Capture Django settings
-	Parses the current environment and collect variables applicable to the Django site.
-
-	:param expected_sections:
-	:type expected_sections:
-	:return:
-	:rtype:
-	"""
-
-	required_expected_sections, optional_expected_sections = set(), set()
-	for expected_section in expected_sections:
-		if re_search(REQUIRED_SECTION_RE, expected_section) is None:
-			optional_expected_sections.add(expected_section)
-		else:
-			required_expected_sections.add(expected_section)
-	environmental_settings, missing_setting_from_env = {}, []
-
-	for required_section in required_expected_sections:
-		for required_setting in expected_sections[required_section]:
-			required_setting_value = getenv(required_setting, '')
-			if len(required_setting_value):
-				environmental_settings[required_setting] = required_setting_value
-			else:
-				missing_setting_from_env.append(required_setting)
-	if len(missing_setting_from_env):
-		raise RuntimeError(f'Missing required settings from env: {missing_setting_from_env}')
-
-	for optional_section in optional_expected_sections:
-		for optional_setting in expected_sections[optional_section]:
-			optional_setting_value = getenv(optional_setting, '')
-			if len(optional_setting_value):
-				environmental_settings[optional_setting] = optional_setting_value
-			else:
-				missing_setting_from_env.append(optional_setting)
-	if len(missing_setting_from_env):
-		warn(f'Missing optional settings from env: {missing_setting_from_env}', RuntimeWarning)
-	for key, value in environ.items():
-		if key[:7] == 'DJANGO_':
-			environmental_settings[key] = value
-
-	return environmental_settings
 
 
 def path_for_setting(django_settings, env_var_name, lowercase=False):
