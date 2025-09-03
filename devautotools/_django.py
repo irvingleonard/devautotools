@@ -488,14 +488,22 @@ class DjangoLinkedSite:
 			current_user = run(('whoami',), capture_output=True, text=True).stdout.strip('\n')
 			current_user = current_user.split('\\')[-1]
 			super_user_details = {
-				'DJANGO_SUPERUSER_LOGIN': current_user,
 				'DJANGO_SUPERUSER_FIRSTNAME': current_user,
 				'DJANGO_SUPERUSER_LASTNAME': current_user,
-				'DJANGO_SUPERUSER_EMAIL': '{}@example.local'.format(current_user),
 				'DJANGO_SUPERUSER_PASSWORD': superuser_password,
 			}
+			params = (
+				str(self.manage_py),
+				'createsuperuser',
+				'--noinput',
+				'--username',
+				current_user,
+				'--email',
+				f'{current_user}@example.local',
+				f'--settings={self.site_name}.local_settings',
+			)
 			LOGGER.info('Creating the super user: %s', current_user)
-			self.venv(str(self.manage_py), 'createsuperuser', '--noinput', '--settings={}.local_settings'.format(self.site_name), env=environ|environment_content|super_user_details)
+			self.venv(*params, env=environ|environment_content|super_user_details)
 			return current_user, superuser_password
 
 	def start(self, *secret_json_files_paths):
