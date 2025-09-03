@@ -80,12 +80,11 @@ def django_normalized_settings(*settings_module_names, django_settings, loose_li
 	if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
 		django_settings['ENVIRONMENTAL_SETTINGS'] = {}
 	django_settings['ENVIRONMENTAL_SETTINGS'] |= django_settings['IMPLICIT_ENVIRONMENTAL_SETTINGS'].copy() | django_settings_env_capture(**django_settings['EXPECTED_VALUES_FROM_ENV'])
+	django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
 
 	for settings_module in settings_modules:
 		if hasattr(settings_module, 'normalized_settings'):
 			django_settings = getattr(settings_module, 'normalized_settings')(**django_settings)
-
-	django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
 
 	return django_settings
 
