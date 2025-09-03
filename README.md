@@ -42,13 +42,13 @@ Produces a string of `key="value"` based on the provided `json` file data, to be
 
 # Normalized Django settings system
 
-This module proposes a normalized system to handle Django settings loading from the environment. 
+This module proposes a normalized system to handle Django settings by loading from the environment. 
 
 ## The settings module
 
-There should be a `settings` module (that could be named anything you want) which should contain several things. Generally you'll create a `local_settings.py` file in your app and fill it with something like:
+There should be a settings module (that could be named anything you want) which should contain several things. Generally you'll create a `local_settings.py` file in your app and fill it with something like:
 ```
-#You should probably check these function's documentation (these are completely optional)
+#You should probably check these functions' documentation (these are completely optional)
 from devautotools import path_for_setting, setting_is_true
 
 #...
@@ -130,14 +130,15 @@ else:
 
 ### IMPLICIT_ENVIRONMENTAL_SETTINGS
 
-This is an optional constant that can be used to provide "default" values to any environmental variable. It's a simple dictionary having `name: value` which will be added to the captured values during the processing. Ex:
+This is a constant that can be used to provide "default" values to any environmental variable. It's a simple dictionary having `name: value` which will be added to the captured values during the processing. Ex:
 ```
 IMPLICIT_ENVIRONMENTAL_SETTINGS = {
   'FOO_BAR' : 'this or that',
   'spam': 'no: ham & eggs',
+  'DJANGO_LOG_LEVEL': 'debug',
 }
 ```
-You can use it to provide defaults across apps (modules).
+You can use it to provide default values across apps (modules). Ex: app `bar` can set a default for a variable used by app `foo`.
 
 ### normalized_settings(**django_settings)
 
@@ -179,8 +180,8 @@ from devautotools import django_normalized_settings
 
 settings_module_names = (
     'devautotools',
-    'foo.settings',
-    'bar.settings',
+    'foo.local_settings',
+    'bar.local_settings',
 )
 global_state = globals()
 global_state |= django_normalized_settings(*settings_module_names, django_settings=globals())
@@ -197,7 +198,7 @@ These are some functions that you can leverage on your `normalized_settings`' lo
 
 ### setting_is_true(value)
 
-It compares the provided string (`value`) to the known "true" values (the `TRUTH_LOWERCASE_STRING_VALUES` constant) in a case-insensitive way and returns and actual boolean.
+It compares the provided string (`value`) to the known "true" values (in the `TRUTH_LOWERCASE_STRING_VALUES` constant) in a case-insensitive way and returns and actual boolean.
 
 ### path_for_setting(django_settings, env_var_name, lowercase=False)
 
