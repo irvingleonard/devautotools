@@ -133,6 +133,25 @@ def django_settings_env_capture(**expected_sections):
 	return environmental_settings
 
 
+def normalize_variable_name(variable_name):
+	"""Normalize a variable name
+	Given a environmental variable name, return the base name (without "_CONTENT" or "_BASE64" suffixes).
+
+	:param variable_name: the name of the variable
+	:type variable_name: str
+	:return: the normalized name
+	:rtype: str
+	"""
+
+	variable_name_upper = variable_name.upper()
+	if variable_name_upper.endswith('_BASE64'):
+		return variable_name[:-7]
+	elif variable_name_upper.endswith('_CONTENT'):
+		return variable_name[:-8]
+	else:
+		return variable_name
+
+
 def normalized_settings(**django_settings):
 	"""Common values for Django
 	Generates basic values for your Django settings.py file.
@@ -188,7 +207,8 @@ def normalized_settings(**django_settings):
 	database_settings, database_options = {}, {}
 	for key in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
 		if key[:24] == 'DJANGO_DATABASE_OPTIONS_':
-			database_options[key[24:]] = path_for_setting(django_settings=django_settings, env_var_name=key, lowercase=True)
+			base_key = normalize_variable_name(key[24:])
+			database_options[base_key] = path_for_setting(django_settings=django_settings, base_var_name=base_key, lowercase=True)
 		elif key[:16] == 'DJANGO_DATABASE_':
 			database_settings[key[16:]] = django_settings['ENVIRONMENTAL_SETTINGS'][key]
 	if database_settings:
@@ -219,10 +239,10 @@ def normalized_settings(**django_settings):
 		django_settings['EMAIL_HOST_USER'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_HOST_USER']
 	if 'DJANGO_EMAIL_HOST_PASSWORD' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
 		django_settings['EMAIL_HOST_PASSWORD'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_HOST_PASSWORD']
-	django_email_ssl_certfile = path_for_setting(django_settings=django_settings, env_var_name='DJANGO_EMAIL_SSL_CERTFILE')
+	django_email_ssl_certfile = path_for_setting(django_settings=django_settings, base_var_name='DJANGO_EMAIL_SSL_CERTFILE')
 	if django_email_ssl_certfile is not None:
 		django_settings['EMAIL_SSL_CERTFILE'] = django_email_ssl_certfile
-	django_email_ssl_keyfile = path_for_setting(django_settings=django_settings, env_var_name='DJANGO_EMAIL_SSL_KEYFILE')
+	django_email_ssl_keyfile = path_for_setting(django_settings=django_settings, base_var_name='DJANGO_EMAIL_SSL_KEYFILE')
 	if django_email_ssl_keyfile is not None:
 		django_settings['EMAIL_SSL_KEYFILE'] = django_email_ssl_keyfile
 
@@ -258,18 +278,18 @@ def normalized_settings(**django_settings):
 	return django_settings
 
 
-def path_for_setting(django_settings, env_var_name, lowercase=False):
+def path_for_setting(django_settings, base_var_name, lowercase=False):
 	"""Path for a setting
 	Given an environment variable name, find the correct value for the corresponding setting. The setting name would be the base name. The logic is:
-	1. if the env_var_name is found, it's returned as is. This is usually the case when the file is managed outside and the path is provided to Django.
-	2. if env_var_name + "_CONTENT" is found (ex: FOO_CONTENT) then the content of the variable is written to a temporary file and the path to such file is returned.
-	3. if env_var_name + "_BASE64" is found (ex: FOO_BASE64) then the content of the variable is base64 decoded, then written to a temporary file, and the path to such file is returned. You can provide binary content using this method but keep in mind the buffer limits of your operating system.
+	1. if the base_var_name is found, it's returned as is. This is usually the case when the file is managed outside and the path is provided to Django.
+	2. if base_var_name + "_CONTENT" is found (ex: FOO_CONTENT) then the content of the variable is written to a temporary file and the path to such file is returned.
+	3. if base_var_name + "_BASE64" is found (ex: FOO_BASE64) then the content of the variable is base64 decoded, then written to a temporary file, and the path to such file is returned. You can provide binary content using this method but keep in mind the buffer limits of your operating system.
 	The file is created using "mkstemp" and any related limitations and security considerations apply. The file is automatically removed when the Python interpreter ends (atexit + os.remove).
 
 	:param django_settings: the global variables from the original settings.py file
 	:type django_settings: dict
-	:param env_var_name: the name of the environment variable to look for
-	:type env_var_name: str
+	:param base_var_name: the name of the environment variable to look for
+	:type base_var_name: str
 	:param lowercase: if the variations suffixes should be lowercase
 	:type lowercase: bool
 	:return: The path for the setting
@@ -277,16 +297,16 @@ def path_for_setting(django_settings, env_var_name, lowercase=False):
 	"""
 
 	env_var_variations = {
-		'content': env_var_name + ('_content' if lowercase else '_CONTENT'),
-		'base64': env_var_name + ('_base64' if lowercase else '_BASE64'),
+		'CONTENT': base_var_name + ('_content' if lowercase else '_CONTENT'),
+		'BASE64': base_var_name + ('_base64' if lowercase else '_BASE64'),
 	}
 
-	if env_var_name in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
-		return django_settings['ENVIRONMENTAL_SETTINGS'][env_var_name]
-	elif env_var_variations['content'] in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
-		extra_mode, file_content = 't', django_settings['ENVIRONMENTAL_SETTINGS'][env_var_variations['content']]
-	elif env_var_variations['base64'] in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
-		extra_mode, file_content = 'b', b64decode(django_settings['ENVIRONMENTAL_SETTINGS'][env_var_variations['base64']])
+	if base_var_name in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		return django_settings['ENVIRONMENTAL_SETTINGS'][base_var_name]
+	elif env_var_variations['CONTENT'] in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		extra_mode, file_content = 't', django_settings['ENVIRONMENTAL_SETTINGS'][env_var_variations['CONTENT']]
+	elif env_var_variations['BASE64'] in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		extra_mode, file_content = 'b', b64decode(django_settings['ENVIRONMENTAL_SETTINGS'][env_var_variations['BASE64']])
 	else:
 		return None
 	
