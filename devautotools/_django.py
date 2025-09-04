@@ -250,6 +250,11 @@ def normalized_settings(**django_settings):
 	if 'DJANGO_EMAIL_USE_LOCALTIME' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
 		django_settings['EMAIL_USE_LOCALTIME'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_USE_LOCALTIME'])
 
+	if 'DJANGO_ALLOWED_HOSTS' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['ALLOWED_HOSTS'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_ALLOWED_HOSTS'].split(',')
+	if 'DJANGO_CSRF_TRUSTED_ORIGINS' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['CSRF_TRUSTED_ORIGINS'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_CSRF_TRUSTED_ORIGINS'].split(',')
+
 	return django_settings
 
 
