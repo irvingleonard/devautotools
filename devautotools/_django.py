@@ -207,8 +207,8 @@ def normalized_settings(**django_settings):
 	database_settings, database_options = {}, {}
 	for key in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
 		if key[:24] == 'DJANGO_DATABASE_OPTIONS_':
-			base_key = normalize_variable_name(key[24:])
-			database_options[base_key] = path_for_setting(django_settings=django_settings, base_var_name=base_key, lowercase=True)
+			base_key = normalize_variable_name(key)
+			database_options[base_key[24:]] = path_for_setting(django_settings=django_settings, base_var_name=base_key, lowercase=True)
 		elif key[:16] == 'DJANGO_DATABASE_':
 			database_settings[key[16:]] = django_settings['ENVIRONMENTAL_SETTINGS'][key]
 	if database_settings:
