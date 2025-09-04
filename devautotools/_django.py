@@ -399,7 +399,7 @@ class DjangoLinkedSite:
 
 		result = {}
 		for json_file_path in secret_json_files_paths:
-			result.update({key.upper(): value for key, value in json_loads(json_file_path.read_text()).items()})
+			result |= json_loads(json_file_path.read_text())
 
 		return result
 
