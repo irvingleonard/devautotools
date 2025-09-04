@@ -337,6 +337,7 @@ class DjangoLinkedSite:
 		'settings.py': 'local_settings.py',
 		'urls.py': None,
 	}
+	DEFAULT_START_URL = 'http://localhost:8000'
 	
 	def __getattr__(self, name):
 		"""Magic attribute resolution
@@ -485,7 +486,7 @@ class DjangoLinkedSite:
 
 		if superuser is not None:
 			result += [
-				'Then go to http://localhost:8000/admin and use credentials {user}:{password}'.format(user=superuser[0], password=superuser[1]),
+				f'Then go to {cls.DEFAULT_START_URL} and use credentials {superuser[0]}:{superuser[1]}',
 				'',
 			]
 
@@ -525,12 +526,14 @@ class DjangoLinkedSite:
 			self.venv(str(self.manage_py), 'createsuperuser', '--noinput', f'--settings={self.site_name}.local_settings', env=environ|environment_content|super_user_details)
 			return current_user, superuser_password
 
-	def start(self, *secret_json_files_paths):
+	def start(self, *secret_json_files_paths, start_url=None):
 		"""Start the Django site
 		Start the site using the "runserver" Django command and open it on the default browser.
 		"""
 
 		environment_content = self._environ_from_json(*secret_json_files_paths)
+		if start_url is None:
+			start_url = self.DEFAULT_START_URL
 
-		webbrowser_open('http://localhost:8000/admin')
+		webbrowser_open(start_url)
 		return self.venv(str(self.manage_py), 'runserver', '--settings={}.local_settings'.format(self.site_name), env=environ|environment_content|{'DJANGO_DEBUG': 'true'})
