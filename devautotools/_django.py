@@ -3,58 +3,163 @@
 Some helper functionality around Django projects.
 """
 
-from atexit import register as atexit_register
 from base64 import b64decode
+from email.utils import getaddresses as parse_email_addresses
+from importlib import import_module
 from json import loads as json_loads
 from logging import getLogger
-from os import environ, getenv, remove as os_remove
+from os import environ, getenv
 from pathlib import Path
 from re import compile as re_compile, search as re_search, IGNORECASE as RE_IGNORECASE
 from shutil import rmtree
 from subprocess import run
-from tempfile import mkstemp
 from warnings import warn
 from webbrowser import open as webbrowser_open
 
+from ._tempfile import mkstemp
 from ._venv import deploy_local_venv
 
 LOGGER = getLogger(__name__)
 POSSIBLE_LOG_LEVELS = ('INFO', 'CRITICAL', 'ERROR', 'WARNING', 'DEBUG')
 REQUIRED_SECTION_RE = re_compile(r'(:?.+_required)|(:?required_.+)', RE_IGNORECASE)
-SSL_FILE_OPTIONS = ('sslcert', 'sslkey', 'sslrootcert')
 TRUTH_LOWERCASE_STRING_VALUES = ('true', 'yes', 'on', '1')
 
-def django_common_settings(settings_globals, parent_callables=None):
-	"""Common values for Django
-	Generates Django values for your settings.py file. It's usually added as:
 
-	global_state = globals()
-	global_state |= django_common_settings(globals())
-
-	:param settings_globals: the caller's "globals"
-	:param parent_callables: an optional list of parent "common_settings" callables
-	:type parent_callables: [callable]|None
-	:return: new content for "globals"
+def deploy_local_django_site(*secret_json_files_paths, dev_from_pypi=False, venv_options={}, pip_install_options={}, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', just_build=False):
+	"""Deploy a local Django site
+	Starts by deploying a new virtual environment via "deploy_local_env()" and then creates a test site with symlinks to the existing project files. It runs the test server until it gets stopped (usually with ctrl + c).
 	"""
 
-	django_settings = settings_globals.copy()
+	return DjangoLinkedSite.deploy_locally(*secret_json_files_paths, django_site_name=django_site_name, extra_paths_to_link=extra_paths_to_link, create_cache_table=create_cache_table, superuser_password=superuser_password, dev_from_pypi=dev_from_pypi, venv_options=venv_options, pip_install_options=pip_install_options, just_build=just_build)
 
+
+def django_normalized_settings(*settings_module_names, django_settings, loose_list=False):
+	"""Normalized Django settings system workhorse
+	The interface to use the normalized Django settings system. It's usually added as:
+
+	settings_module_names = (
+		'devautotools',
+		'foo.settings',
+		'bar.settings',
+	)
+	global_state = globals()
+	global_state |= django_normalized_settings(*settings_module_names, django_settings=globals())
+
+	The modules will be processed in the provided order, so value overrides if present will apply in the same order.
+
+	:param settings_module_names: module names to load; each of them could include "EXPECTED_VALUES_FROM_ENV" and "IMPLICIT_ENVIRONMENTAL_SETTINGS" constants and a "common_settings" callable.
+	:type settings_module_names: str
+	:param django_settings: usually the "globals()" from the calling settings.py
+	:type django_settings: Any
+	:param loose_list: will not stop execution when it fails to load a "settings_module" if False
+	:type loose_list: bool
+	"""
+
+	settings_modules = []
+	for module_name in settings_module_names:
+		try:
+			if isinstance(module_name, str):
+				settings_modules.append(import_module(module_name))
+			else:
+				settings_modules.append(import_module(*module_name))
+		except ImportError:
+			if loose_list:
+				LOGGER.exception("Couldn't load settings module: %s", module_name)
+			else:
+				raise
+
+	django_settings = django_settings.copy()
 	if 'EXPECTED_VALUES_FROM_ENV' not in django_settings:
 		django_settings['EXPECTED_VALUES_FROM_ENV'] = {}
+	if 'IMPLICIT_ENVIRONMENTAL_SETTINGS' not in django_settings:
+		django_settings['IMPLICIT_ENVIRONMENTAL_SETTINGS'] = {}
+	for settings_module in settings_modules:
+		django_settings['EXPECTED_VALUES_FROM_ENV'] |= getattr(settings_module, 'EXPECTED_VALUES_FROM_ENV', {})
+		django_settings['IMPLICIT_ENVIRONMENTAL_SETTINGS'] |= getattr(settings_module, 'IMPLICIT_ENVIRONMENTAL_SETTINGS', {})
 
-	if parent_callables is None:
-		if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
-			django_settings['ENVIRONMENTAL_SETTINGS'] = {}
-		django_settings['ENVIRONMENTAL_SETTINGS'] |= django_settings_env_capture()
-		django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
-	elif parent_callables:
-		parent_common_settings = parent_callables.pop(0)
-		django_settings = parent_common_settings(django_settings, parent_callables=parent_callables)
+	if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
+		django_settings['ENVIRONMENTAL_SETTINGS'] = {}
+	django_settings['ENVIRONMENTAL_SETTINGS'] |= django_settings['IMPLICIT_ENVIRONMENTAL_SETTINGS'].copy() | django_settings_env_capture(**django_settings['EXPECTED_VALUES_FROM_ENV'])
+	django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
+
+	for settings_module in settings_modules:
+		if hasattr(settings_module, 'normalized_settings'):
+			django_settings = getattr(settings_module, 'normalized_settings')(**django_settings)
+
+	return django_settings
+
+
+def django_settings_env_capture(**expected_sections):
+	"""Capture Django settings
+	Parses the current environment and collect variables applicable to the Django site.
+
+	:param expected_sections:
+	:type expected_sections:
+	:return:
+	:rtype:
+	"""
+
+	required_expected_sections, optional_expected_sections = set(), set()
+	for expected_section in expected_sections:
+		if re_search(REQUIRED_SECTION_RE, expected_section) is None:
+			optional_expected_sections.add(expected_section)
+		else:
+			required_expected_sections.add(expected_section)
+	environmental_settings, missing_setting_from_env = {}, []
+
+	for required_section in required_expected_sections:
+		for required_setting in expected_sections[required_section]:
+			required_setting_value = getenv(required_setting, '')
+			if len(required_setting_value):
+				environmental_settings[required_setting] = required_setting_value
+			else:
+				missing_setting_from_env.append(required_setting)
+	if len(missing_setting_from_env):
+		raise RuntimeError(f'Missing required settings from env: {missing_setting_from_env}')
+
+	for optional_section in optional_expected_sections:
+		for optional_setting in expected_sections[optional_section]:
+			optional_setting_value = getenv(optional_setting, '')
+			if len(optional_setting_value):
+				environmental_settings[optional_setting] = optional_setting_value
+			else:
+				missing_setting_from_env.append(optional_setting)
+	if len(missing_setting_from_env):
+		warn(f'Missing optional settings from env: {missing_setting_from_env}', RuntimeWarning)
+	for key, value in environ.items():
+		if key[:7] == 'DJANGO_':
+			environmental_settings[key] = value
+
+	return environmental_settings
+
+
+def normalize_variable_name(variable_name):
+	"""Normalize a variable name
+	Given a environmental variable name, return the base name (without "_CONTENT" or "_BASE64" suffixes).
+
+	:param variable_name: the name of the variable
+	:type variable_name: str
+	:return: the normalized name
+	:rtype: str
+	"""
+
+	variable_name_upper = variable_name.upper()
+	if variable_name_upper.endswith('_BASE64'):
+		return variable_name[:-7]
+	elif variable_name_upper.endswith('_CONTENT'):
+		return variable_name[:-8]
 	else:
-		if 'ENVIRONMENTAL_SETTINGS' not in django_settings:
-			django_settings['ENVIRONMENTAL_SETTINGS'] = {}
-		django_settings['ENVIRONMENTAL_SETTINGS'] |= django_settings_env_capture(**django_settings['EXPECTED_VALUES_FROM_ENV'])
-		django_settings['ENVIRONMENTAL_SETTINGS_KEYS'] = frozenset(django_settings['ENVIRONMENTAL_SETTINGS'].keys())
+		return variable_name
+
+
+def normalized_settings(**django_settings):
+	"""Common values for Django
+	Generates basic values for your Django settings.py file.
+
+	:param django_settings: the current Django settings collection (ultimately the content of globals())
+	:type django_settings: Any
+	:return: new content for Django settings
+	"""
 
 	django_settings['DEBUG'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_DEBUG', ''))
 
@@ -102,93 +207,115 @@ def django_common_settings(settings_globals, parent_callables=None):
 	database_settings, database_options = {}, {}
 	for key in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
 		if key[:24] == 'DJANGO_DATABASE_OPTIONS_':
-			local_key = key[24:]
-			database_options[local_key.lower()] = django_settings['ENVIRONMENTAL_SETTINGS'][local_key]
+			base_key = normalize_variable_name(key)
+			database_options[base_key[24:]] = path_for_setting(django_settings=django_settings, base_var_name=base_key, lowercase=True)
 		elif key[:16] == 'DJANGO_DATABASE_':
-			local_key = key[16:]
-			database_settings[local_key] = django_settings['ENVIRONMENTAL_SETTINGS'][local_key]
+			database_settings[key[16:]] = django_settings['ENVIRONMENTAL_SETTINGS'][key]
 	if database_settings:
 		if database_options:
-			for key in list(database_options.keys()):
-				if key.rstrip('_base64').rstrip('_content').rstrip('_path') in SSL_FILE_OPTIONS:
-					if key[-5:] == '_path':
-						clean_key = key[:-5]
-						file_content = None
-						file_path = database_options[key]
-					elif key[-7:] == '_base64':
-						clean_key = key[:-7]
-						file_content = b64decode(django_settings['ENVIRONMENTAL_SETTINGS'][key]).decode()
-					elif key[-8:] == '_content':
-						clean_key = key[:-8]
-						file_content = django_settings['ENVIRONMENTAL_SETTINGS'][key]
-					else:
-						warn(f'Unknown Database SSL file option variation: {key}', RuntimeWarning)
-						continue
-					if file_content is not None:
-						file_desc, file_path = mkstemp(text=True)
-						atexit_register(os_remove, file_path)
-						with open(file_path, 'wt') as file_obj:
-							file_obj.write(file_content)
-					database_options[clean_key] = file_path
 			database_settings['OPTIONS'] = database_options
 		else:
-			warn(f'Potentially missing database SSL options; the connection could be insecure: {SSL_FILE_OPTIONS}')
+			warn('Potentially missing database SSL options; the connection could be insecure.', RuntimeWarning)
 		django_settings['DATABASES'] = {'default' : database_settings}
 	else:
 		warn('Not enough information to connect to an external database; using the builtin SQLite', RuntimeWarning)
 
+	if 'DJANGO_EMAIL_BACKEND' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_BACKEND'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_BACKEND']
+	if 'DJANGO_EMAIL_HOST' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_HOST'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_HOST']
+	if 'DJANGO_EMAIL_PORT' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_PORT'] = int(django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_PORT'])
+	if 'DJANGO_EMAIL_TIMEOUT' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_TIMEOUT'] = int(django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_TIMEOUT'])
+	if 'DJANGO_EMAIL_USE_SSL' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_USE_SSL'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_USE_SSL'])
+	if (('EMAIL_USE_SSL' not in django_settings) or not django_settings['EMAIL_USE_SSL']) and ('DJANGO_EMAIL_USE_TLS' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']):
+		django_settings['EMAIL_USE_TLS'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_USE_TLS'])
+	if 'DJANGO_EMAIL_FILE_PATH' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_FILE_PATH'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_FILE_PATH']
+
+	if 'DJANGO_EMAIL_HOST_USER' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_HOST_USER'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_HOST_USER']
+	if 'DJANGO_EMAIL_HOST_PASSWORD' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_HOST_PASSWORD'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_HOST_PASSWORD']
+	django_email_ssl_certfile = path_for_setting(django_settings=django_settings, base_var_name='DJANGO_EMAIL_SSL_CERTFILE')
+	if django_email_ssl_certfile is not None:
+		django_settings['EMAIL_SSL_CERTFILE'] = django_email_ssl_certfile
+	django_email_ssl_keyfile = path_for_setting(django_settings=django_settings, base_var_name='DJANGO_EMAIL_SSL_KEYFILE')
+	if django_email_ssl_keyfile is not None:
+		django_settings['EMAIL_SSL_KEYFILE'] = django_email_ssl_keyfile
+
+	server_email = django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_SERVER_EMAIL', '')
+	default_from_email = django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_DEFAULT_FROM_EMAIL', '')
+	if server_email and default_from_email:
+		django_settings['SERVER_EMAIL'] = server_email
+		django_settings['DEFAULT_FROM_EMAIL'] = default_from_email
+	elif server_email:
+		django_settings['SERVER_EMAIL'] = django_settings['DEFAULT_FROM_EMAIL'] = server_email
+	elif default_from_email:
+		django_settings['SERVER_EMAIL'] = django_settings['DEFAULT_FROM_EMAIL'] = default_from_email
+	admin_addresses = parse_email_addresses(django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_ADMINS', ''))
+	manager_addresses = parse_email_addresses(django_settings['ENVIRONMENTAL_SETTINGS'].get('DJANGO_MANAGERS', ''))
+	if admin_addresses and manager_addresses:
+		django_settings['ADMINS'] = admin_addresses
+		django_settings['MANAGERS'] = manager_addresses
+	elif admin_addresses:
+		django_settings['ADMINS'] = django_settings['MANAGERS'] = admin_addresses
+	elif manager_addresses:
+		django_settings['ADMINS'] = django_settings['MANAGERS'] = manager_addresses
+
+	if 'DJANGO_EMAIL_SUBJECT_PREFIX' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_SUBJECT_PREFIX'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_SUBJECT_PREFIX'])
+	if 'DJANGO_EMAIL_USE_LOCALTIME' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['EMAIL_USE_LOCALTIME'] = setting_is_true(django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_EMAIL_USE_LOCALTIME'])
+
+	if 'DJANGO_ALLOWED_HOSTS' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['ALLOWED_HOSTS'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_ALLOWED_HOSTS'].split(',')
+	if 'DJANGO_CSRF_TRUSTED_ORIGINS' in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		django_settings['CSRF_TRUSTED_ORIGINS'] = django_settings['ENVIRONMENTAL_SETTINGS']['DJANGO_CSRF_TRUSTED_ORIGINS'].split(',')
+
 	return django_settings
 
-def deploy_local_django_site(*secret_json_files_paths, dev_from_pypi=False, venv_options={}, pip_install_options={}, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', just_build=False):
-	"""Deploy a local Django site
-	Starts by deploying a new virtual environment via "deploy_local_env()" and then creates a test site with symlinks to the existing project files. It runs the test server until it gets stopped (usually with ctrl + c).
+
+def path_for_setting(django_settings, base_var_name, lowercase=False):
+	"""Path for a setting
+	Given an environment variable name, find the correct value for the corresponding setting. The setting name would be the base name. The logic is:
+	1. if the base_var_name is found, it's returned as is. This is usually the case when the file is managed outside and the path is provided to Django.
+	2. if base_var_name + "_CONTENT" is found (ex: FOO_CONTENT) then the content of the variable is written to a temporary file and the path to such file is returned.
+	3. if base_var_name + "_BASE64" is found (ex: FOO_BASE64) then the content of the variable is base64 decoded, then written to a temporary file, and the path to such file is returned. You can provide binary content using this method but keep in mind the buffer limits of your operating system.
+	The file is created using "mkstemp" and any related limitations and security considerations apply. The file is automatically removed when the Python interpreter ends (atexit + os.remove).
+
+	:param django_settings: the global variables from the original settings.py file
+	:type django_settings: dict
+	:param base_var_name: the name of the environment variable to look for
+	:type base_var_name: str
+	:param lowercase: if the variations suffixes should be lowercase
+	:type lowercase: bool
+	:return: The path for the setting
+	:rtype: any
 	"""
 
-	return DjangoLinkedSite.deploy_locally(*secret_json_files_paths, django_site_name=django_site_name, extra_paths_to_link=extra_paths_to_link, create_cache_table=create_cache_table, superuser_password=superuser_password, dev_from_pypi=dev_from_pypi, venv_options=venv_options, pip_install_options=pip_install_options, just_build=just_build)
+	env_var_variations = {
+		'CONTENT': base_var_name + ('_content' if lowercase else '_CONTENT'),
+		'BASE64': base_var_name + ('_base64' if lowercase else '_BASE64'),
+	}
 
+	if base_var_name in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		return django_settings['ENVIRONMENTAL_SETTINGS'][base_var_name]
+	elif env_var_variations['CONTENT'] in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		extra_mode, file_content = 't', django_settings['ENVIRONMENTAL_SETTINGS'][env_var_variations['CONTENT']]
+	elif env_var_variations['BASE64'] in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		extra_mode, file_content = 'b', b64decode(django_settings['ENVIRONMENTAL_SETTINGS'][env_var_variations['BASE64']])
+	else:
+		return None
+	
+	file_desc, file_path = mkstemp(text=True, session=True)
+	with open(file_path, 'w'+extra_mode) as file_obj:
+		file_obj.write(file_content)
 
-def django_settings_env_capture(**expected_sections):
-	"""Capture Django settings
-	Parses the current environment and collect variables applicable to the Django site.
+	return file_path
 
-	:param expected_sections:
-	:type expected_sections:
-	:return:
-	:rtype:
-	"""
-
-	required_expected_sections, optional_expected_sections = set(), set()
-	for expected_section in expected_sections:
-		if re_search(REQUIRED_SECTION_RE, expected_section) is None:
-			optional_expected_sections.add(expected_section)
-		else:
-			required_expected_sections.add(expected_section)
-	environmental_settings, missing_setting_from_env = {}, []
-
-	for required_section in required_expected_sections:
-		for required_setting in expected_sections[required_section]:
-			required_setting_value = getenv(required_setting, '')
-			if len(required_setting_value):
-				environmental_settings[required_setting] = required_setting_value
-			else:
-				missing_setting_from_env.append(required_setting)
-	if len(missing_setting_from_env):
-		raise RuntimeError(f'Missing required settings from env: {missing_setting_from_env}')
-
-	for optional_section in optional_expected_sections:
-		for optional_setting in expected_sections[optional_section]:
-			optional_setting_value = getenv(optional_setting, '')
-			if len(optional_setting_value):
-				environmental_settings[optional_setting] = optional_setting_value
-			else:
-				missing_setting_from_env.append(optional_setting)
-	if len(missing_setting_from_env):
-		warn(f'Missing optional settings from env: {missing_setting_from_env}', RuntimeWarning)
-	for key, value in environ.items():
-		if key[:7] == 'DJANGO_':
-			environmental_settings[key] = value
-
-	return environmental_settings
 
 def setting_is_true(value):
 	"""Setting is True
@@ -200,6 +327,7 @@ def setting_is_true(value):
 
 	return value.strip().lower() in TRUTH_LOWERCASE_STRING_VALUES
 
+
 class DjangoLinkedSite:
 	"""Django linked site
 	Create a Django site using symlinks to the project files. Potentially useful to develop Django applications while testing them live.
@@ -209,6 +337,7 @@ class DjangoLinkedSite:
 		'settings.py': 'local_settings.py',
 		'urls.py': None,
 	}
+	DEFAULT_START_URL = 'http://localhost:8000'
 	
 	def __getattr__(self, name):
 		"""Magic attribute resolution
@@ -270,7 +399,7 @@ class DjangoLinkedSite:
 
 		result = {}
 		for json_file_path in secret_json_files_paths:
-			result.update({key.upper(): value for key, value in json_loads(json_file_path.read_text()).items()})
+			result |= json_loads(json_file_path.read_text())
 
 		return result
 
@@ -357,7 +486,7 @@ class DjangoLinkedSite:
 
 		if superuser is not None:
 			result += [
-				'Then go to http://localhost:8000/admin and use credentials {user}:{password}'.format(user=superuser[0], password=superuser[1]),
+				f'Then go to {cls.DEFAULT_START_URL} and use credentials {superuser[0]}:{superuser[1]}',
 				'',
 			]
 
@@ -382,23 +511,29 @@ class DjangoLinkedSite:
 
 		if len(superuser_password):
 			current_user = run(('whoami',), capture_output=True, text=True).stdout.strip('\n')
+			current_user = current_user.split('\\')[-1]
+			username_parameter_name = environ.get('DJANGO_CREATESUPERUSER_USERNAME', 'username')
+			email_parameter_name = environ.get('DJANGO_CREATESUPERUSER_EMAIL', 'email')
+
 			super_user_details = {
-				'DJANGO_SUPERUSER_LOGIN': current_user,
+				f'DJANGO_SUPERUSER_{username_parameter_name.upper()}': current_user,
 				'DJANGO_SUPERUSER_FIRSTNAME': current_user,
 				'DJANGO_SUPERUSER_LASTNAME': current_user,
-				'DJANGO_SUPERUSER_EMAIL': '{}@example.local'.format(current_user),
+				f'DJANGO_SUPERUSER_{email_parameter_name.upper()}': f'{current_user}@example.local',
 				'DJANGO_SUPERUSER_PASSWORD': superuser_password,
 			}
 			LOGGER.info('Creating the super user: %s', current_user)
-			self.venv(str(self.manage_py), 'createsuperuser', '--noinput', '--settings={}.local_settings'.format(self.site_name), env=environ|environment_content|super_user_details)
+			self.venv(str(self.manage_py), 'createsuperuser', '--noinput', f'--settings={self.site_name}.local_settings', env=environ|environment_content|super_user_details)
 			return current_user, superuser_password
 
-	def start(self, *secret_json_files_paths):
+	def start(self, *secret_json_files_paths, start_url=None):
 		"""Start the Django site
 		Start the site using the "runserver" Django command and open it on the default browser.
 		"""
 
 		environment_content = self._environ_from_json(*secret_json_files_paths)
+		if start_url is None:
+			start_url = self.DEFAULT_START_URL
 
-		webbrowser_open('http://localhost:8000/admin')
+		webbrowser_open(start_url)
 		return self.venv(str(self.manage_py), 'runserver', '--settings={}.local_settings'.format(self.site_name), env=environ|environment_content|{'DJANGO_DEBUG': 'true'})
