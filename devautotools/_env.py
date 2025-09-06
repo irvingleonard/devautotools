@@ -125,10 +125,10 @@ env_vars_from_ini = lambda *input_files, sep=' ', uppercase_vars=False: env_with
 env_vars_from_json = lambda *input_files, sep=' ', uppercase_vars=False: env_with_vars_from_json(*input_files, sep=sep, uppercase_vars=uppercase_vars)[4:]
 
 
-env_with_vars_from_ini = lambda *input_files, sep=' ', uppercase_vars=False: _env_with_vars_from_file(*input_files, '_load_vars_from_ini', sep=sep, uppercase_vars=uppercase_vars)
+env_with_vars_from_ini = lambda *input_files, sep=' ', uppercase_vars=False: _env_with_vars_from_file(*input_files, file_loader='_load_vars_from_ini', sep=sep, uppercase_vars=uppercase_vars)
 
 
-env_with_vars_from_json = lambda *input_files, sep=' ', uppercase_vars=False: _env_with_vars_from_file(*input_files, '_load_vars_from_json', sep=sep, uppercase_vars=uppercase_vars)
+env_with_vars_from_json = lambda *input_files, sep=' ', uppercase_vars=False: _env_with_vars_from_file(*input_files, file_loader='_load_vars_from_json', sep=sep, uppercase_vars=uppercase_vars)
 
 
 class EnvironmentalPipes:
