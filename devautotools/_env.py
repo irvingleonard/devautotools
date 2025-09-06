@@ -7,38 +7,53 @@ from base64 import b64decode, b64encode
 from configparser import ConfigParser
 from json import dumps as json_dumps, load as json_load, loads as json_loads
 from logging import getLogger
+from os import name as os_name
 from pathlib import Path
 from shlex import quote as shlex_quote
 
 LOGGER = getLogger(__name__)
 
-def env_vars_from_ini(*input_files, sep=' ', uppercase_vars=False):
+
+def _env_with_vars_from_file(*input_files, file_loader, sep=' ', uppercase_vars=False):
 	"""Env variables from INI files
 	Parses INI files containing the variables and prints a line, ready to be fed to "env".
 	"""
+	
+	variables = globals()[file_loader](*input_files)
+	if uppercase_vars:
+		variables = {key.upper(): value for key, value in variables.items()}
+	if os_name == 'nt':
+		variables = [f'$env:{key}={shlex_quote(str(value))};' for key, value in variables.items()]
+		return sep.join(variables)
+	else:
+		variables = [f'{key}={shlex_quote(str(value))}' for key, value in variables.items()]
+		return f'env {sep.join(variables)}'
 
+
+def _load_vars_from_ini(*input_files):
+	"""Load env vars from ini
+	Parses INI files containing the variables and returns a flat dictionary with them.
+	"""
+	
 	result = {}
-
+	
 	for input_file in input_files:
 		input_file = Path(input_file)
 		if input_file.is_file():
 			LOGGER.debug('Working with file: %s', input_file)
 		else:
 			LOGGER.error('Unable to access file: %s', input_file)
-
+		
 		config = ConfigParser()
 		config.optionxform = str
 		config.read_file(input_file.open())
 		for section, content in config.items():
 			LOGGER.debug('Adding settings from section %s', section)
-			for key, value in content.items():
-				if uppercase_vars:
-					key = key.upper()
-				result[key] = shlex_quote(str(value))
+			result.update(content)
+		return result
 
-	return sep.join(['='.join((key, value)) for key, value in result.items()])
 
-def env_vars_from_json(*input_files, sep=' ', uppercase_vars=False):
+def _load_vars_from_json(*input_files, sep=' ', uppercase_vars=False):
 	"""Env variables from JSON files
 	Parses JSON files containing the variables and prints a line, ready to be fed to "env".
 	"""
@@ -56,11 +71,9 @@ def env_vars_from_json(*input_files, sep=' ', uppercase_vars=False):
 		for key, value in content.items():
 			if isinstance(value, (list, dict)):
 				value = json_dumps(value)
-			if uppercase_vars:
-				key = key.upper()
-			result[key] = shlex_quote(str(value))
-
-	return sep.join(['='.join((key, value)) for key, value in result.items()])
+			result[key] = value
+			
+	return result
 
 
 def _pack_path(path_to_pack):
@@ -76,6 +89,7 @@ def _pack_path(path_to_pack):
 		raise ValueError('Not a packable path: {}'.format(path_to_pack))
 
 	return result
+
 
 def _unpack_path(tree_node, parent_path, overwrite_files = False):
 	"""Unpacks a path recursively
@@ -103,6 +117,18 @@ def _unpack_path(tree_node, parent_path, overwrite_files = False):
 			raise ValueError('Malformed path pack')
 
 	return result
+
+
+env_vars_from_ini = lambda *input_files, sep=' ', uppercase_vars=False: env_with_vars_from_ini(*input_files, sep=sep, uppercase_vars=uppercase_vars)[4:]
+
+
+env_vars_from_json = lambda *input_files, sep=' ', uppercase_vars=False: env_with_vars_from_json(*input_files, sep=sep, uppercase_vars=uppercase_vars)[4:]
+
+
+env_with_vars_from_ini = lambda *input_files, sep=' ', uppercase_vars=False: _env_with_vars_from_file(*input_files, '_load_vars_from_ini', sep=sep, uppercase_vars=uppercase_vars)
+
+
+env_with_vars_from_json = lambda *input_files, sep=' ', uppercase_vars=False: _env_with_vars_from_file(*input_files, '_load_vars_from_json', sep=sep, uppercase_vars=uppercase_vars)
 
 
 class EnvironmentalPipes:

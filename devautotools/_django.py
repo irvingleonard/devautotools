@@ -8,7 +8,7 @@ from email.utils import getaddresses as parse_email_addresses
 from importlib import import_module
 from json import loads as json_loads
 from logging import getLogger
-from os import environ, getenv
+from os import environ, getenv, name as os_name
 from pathlib import Path
 from re import compile as re_compile, search as re_search, IGNORECASE as RE_IGNORECASE
 from shutil import rmtree
@@ -496,7 +496,9 @@ class DjangoLinkedSite:
 		site.venv.install('devautotools', **pip_install_options)
 		site.create(project_paths_to_site=extra_paths_to_link)
 		superuser = site.initialize(environment_content=environment_content, create_cache_table=create_cache_table, superuser_password=superuser_password)
-
+		
+		env_django_debug = ['$env:DJANGO_DEBUG=true;'] if os_name == 'nt' else ['env DJANGO_DEBUG=true']
+		
 		if secret_json_files_paths:
 			inline_vars = ['`./venv/bin/python -m devautotools env_vars_from_json --uppercase_vars {secret_files}`'.format(secret_files=' '.join([str(s) for s in secret_json_files_paths]))]
 		else:
@@ -507,7 +509,7 @@ class DjangoLinkedSite:
 			'',
 			'You can run this again with:',
 			'',
-			' '.join(['env DJANGO_DEBUG=true'] + inline_vars + ['./venv/bin/python ./test_site/manage.py runserver --settings=test_site.local_settings']),
+			' '.join(env_django_debug + inline_vars + ['./venv/bin/python ./test_site/manage.py runserver --settings=test_site.local_settings']),
 			'',
 		]
 
