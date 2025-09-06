@@ -500,7 +500,8 @@ class DjangoLinkedSite:
 		env_django_debug = ['$env:DJANGO_DEBUG=true;'] if os_name == 'nt' else ['env DJANGO_DEBUG=true']
 		
 		if secret_json_files_paths:
-			inline_vars = ['`./venv/bin/python -m devautotools env_vars_from_json --uppercase_vars {secret_files}`'.format(secret_files=' '.join([str(s) for s in secret_json_files_paths]))]
+			env_python_path = '.\\venv\\Scripts\\python.exe' if os_name == 'nt' else './venv/bin/python'
+			inline_vars = ['`{env_python_path} -m devautotools env_with_vars_from_json {secret_files}`'.format(env_python_path=env_python_path, secret_files=' '.join([str(s) for s in secret_json_files_paths]))]
 		else:
 			inline_vars = []
 
