@@ -9,4 +9,4 @@ from ._env import env_vars_from_ini, env_vars_from_json, env_with_vars_from_ini,
 from ._venv import deploy_local_venv
 from ._venvctrl import VirtualEnvironmentManager
 
-__version__ = '1.2.0.dev1'
+__version__ = '1.2.0.dev2'
