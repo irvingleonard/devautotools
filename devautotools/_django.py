@@ -8,7 +8,7 @@ from email.utils import getaddresses as parse_email_addresses
 from importlib import import_module
 from json import loads as json_loads
 from logging import getLogger
-from os import environ, getenv
+from os import environ, getenv, name as os_name
 from pathlib import Path
 from re import compile as re_compile, search as re_search, IGNORECASE as RE_IGNORECASE
 from shutil import rmtree
@@ -23,6 +23,45 @@ LOGGER = getLogger(__name__)
 POSSIBLE_LOG_LEVELS = ('INFO', 'CRITICAL', 'ERROR', 'WARNING', 'DEBUG')
 REQUIRED_SECTION_RE = re_compile(r'(:?.+_required)|(:?required_.+)', RE_IGNORECASE)
 TRUTH_LOWERCASE_STRING_VALUES = ('true', 'yes', 'on', '1')
+
+
+def _decode_setting(django_settings, base_var_name, lowercase=False):
+	"""Decode a setting
+	Given an environment variable name, find the correct value for the corresponding setting. The setting name would be the base name. The logic is:
+	1. if the base_var_name is found, it's returned as is and the "decoded" flag is False
+	2. if base_var_name + "_CONTENT" is found (ex: FOO_CONTENT) then the content is returned as is.
+	3. if base_var_name + "_BASE64" is found (ex: FOO_BASE64) then the content of the variable is base64 decoded before returning it.
+	In every case but #1 the "decoded" flag will be True, meaning that you can use it to identify if this function found the "base_var_name" or a variation of it.
+	If you're not interested on the decoding flag and want the decoded value unconditionally, use the "decode_setting" instead.
+
+	:param django_settings: the global variables from the original settings.py file
+	:type django_settings: dict
+	:param base_var_name: the name of the environment variable to look for
+	:type base_var_name: str
+	:param lowercase: if the variations suffixes should be lowercase
+	:type lowercase: bool
+	:return: A tuple of length 2, with the "decoded" flag first and the decoded content of the variable on the 2nd.
+	:rtype: tuple
+	"""
+	
+	env_var_variations = {
+		'CONTENT': base_var_name + ('_content' if lowercase else '_CONTENT'),
+		'BASE64': base_var_name + ('_base64' if lowercase else '_BASE64'),
+	}
+	
+	decoded, content = True, None
+	if base_var_name in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		decoded, content = False, django_settings['ENVIRONMENTAL_SETTINGS'][base_var_name]
+	elif env_var_variations['CONTENT'] in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		content = django_settings['ENVIRONMENTAL_SETTINGS'][env_var_variations['CONTENT']]
+	elif env_var_variations['BASE64'] in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
+		content = b64decode(django_settings['ENVIRONMENTAL_SETTINGS'][env_var_variations['BASE64']])
+	else:
+		decoded = False
+	
+	return decoded, content
+
+decode_setting = lambda django_settings, base_var_name, lowercase=False: _decode_setting(django_settings=django_settings, base_var_name=base_var_name, lowercase=lowercase)[1]
 
 
 def deploy_local_django_site(*secret_json_files_paths, dev_from_pypi=False, venv_options={}, pip_install_options={}, django_site_name='test_site', extra_paths_to_link='', create_cache_table=False, superuser_password='', just_build=False):
@@ -98,7 +137,14 @@ def django_settings_env_capture(**expected_sections):
 	:return:
 	:rtype:
 	"""
-
+	
+	known_variations = (
+		'_CONTENT',
+		'_content',
+		'_BASE64',
+		'_base64',
+	)
+	
 	required_expected_sections, optional_expected_sections = set(), set()
 	for expected_section in expected_sections:
 		if re_search(REQUIRED_SECTION_RE, expected_section) is None:
@@ -109,20 +155,38 @@ def django_settings_env_capture(**expected_sections):
 
 	for required_section in required_expected_sections:
 		for required_setting in expected_sections[required_section]:
-			required_setting_value = getenv(required_setting, '')
-			if len(required_setting_value):
-				environmental_settings[required_setting] = required_setting_value
+			required_setting_found = False
+			for known_variation in known_variations:
+				required_setting_variation = required_setting + known_variation
+				required_setting_value = getenv(required_setting_variation, '')
+				if len(required_setting_value):
+					environmental_settings[required_setting_variation] = required_setting_value
+					required_setting_found = True
 			else:
+				required_setting_value = getenv(required_setting, '')
+				if len(required_setting_value):
+					environmental_settings[required_setting] = required_setting_value
+					required_setting_found = True
+			if not required_setting_found:
 				missing_setting_from_env.append(required_setting)
 	if len(missing_setting_from_env):
 		raise RuntimeError(f'Missing required settings from env: {missing_setting_from_env}')
 
 	for optional_section in optional_expected_sections:
 		for optional_setting in expected_sections[optional_section]:
-			optional_setting_value = getenv(optional_setting, '')
-			if len(optional_setting_value):
-				environmental_settings[optional_setting] = optional_setting_value
+			optional_setting_found = False
+			for known_variation in known_variations:
+				optional_setting_variation = optional_setting + known_variation
+				optional_setting_value = getenv(optional_setting_variation, '')
+				if len(optional_setting_value):
+					environmental_settings[optional_setting_variation] = optional_setting_value
+					optional_setting_found = True
 			else:
+				optional_setting_value = getenv(optional_setting, '')
+				if len(optional_setting_value):
+					environmental_settings[optional_setting] = optional_setting_value
+					optional_setting_found = True
+			if not optional_setting_found:
 				missing_setting_from_env.append(optional_setting)
 	if len(missing_setting_from_env):
 		warn(f'Missing optional settings from env: {missing_setting_from_env}', RuntimeWarning)
@@ -280,11 +344,7 @@ def normalized_settings(**django_settings):
 
 def path_for_setting(django_settings, base_var_name, lowercase=False):
 	"""Path for a setting
-	Given an environment variable name, find the correct value for the corresponding setting. The setting name would be the base name. The logic is:
-	1. if the base_var_name is found, it's returned as is. This is usually the case when the file is managed outside and the path is provided to Django.
-	2. if base_var_name + "_CONTENT" is found (ex: FOO_CONTENT) then the content of the variable is written to a temporary file and the path to such file is returned.
-	3. if base_var_name + "_BASE64" is found (ex: FOO_BASE64) then the content of the variable is base64 decoded, then written to a temporary file, and the path to such file is returned. You can provide binary content using this method but keep in mind the buffer limits of your operating system.
-	The file is created using "mkstemp" and any related limitations and security considerations apply. The file is automatically removed when the Python interpreter ends (atexit + os.remove).
+	Given an environment variable name, decode the content if applicable, write it into a temporary file and return the path to such file. The "decoding" logic is implemented on the "_decode_setting" function. The file is created using "mkstemp" and any related limitations and security considerations apply. The file is automatically removed when the Python interpreter ends (atexit + os.remove).
 
 	:param django_settings: the global variables from the original settings.py file
 	:type django_settings: dict
@@ -295,24 +355,16 @@ def path_for_setting(django_settings, base_var_name, lowercase=False):
 	:return: The path for the setting
 	:rtype: any
 	"""
-
-	env_var_variations = {
-		'CONTENT': base_var_name + ('_content' if lowercase else '_CONTENT'),
-		'BASE64': base_var_name + ('_base64' if lowercase else '_BASE64'),
-	}
-
-	if base_var_name in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
-		return django_settings['ENVIRONMENTAL_SETTINGS'][base_var_name]
-	elif env_var_variations['CONTENT'] in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
-		extra_mode, file_content = 't', django_settings['ENVIRONMENTAL_SETTINGS'][env_var_variations['CONTENT']]
-	elif env_var_variations['BASE64'] in django_settings['ENVIRONMENTAL_SETTINGS_KEYS']:
-		extra_mode, file_content = 'b', b64decode(django_settings['ENVIRONMENTAL_SETTINGS'][env_var_variations['BASE64']])
-	else:
-		return None
+	
+	decoded, content = _decode_setting(django_settings=django_settings, base_var_name=base_var_name, lowercase=lowercase)
+	if not decoded:
+		return content
+	
+	extra_mode = 't' if isinstance(content, str) else 'b'
 	
 	file_desc, file_path = mkstemp(text=True, session=True)
-	with open(file_path, 'w'+extra_mode) as file_obj:
-		file_obj.write(file_content)
+	with open(file_path, f'w{extra_mode}') as file_obj:
+		file_obj.write(content)
 
 	return file_path
 
@@ -469,9 +521,12 @@ class DjangoLinkedSite:
 		site.venv.install('devautotools', **pip_install_options)
 		site.create(project_paths_to_site=extra_paths_to_link)
 		superuser = site.initialize(environment_content=environment_content, create_cache_table=create_cache_table, superuser_password=superuser_password)
-
+		
+		env_django_debug = ['$env:DJANGO_DEBUG=true;'] if os_name == 'nt' else ['env DJANGO_DEBUG=true']
+		
 		if secret_json_files_paths:
-			inline_vars = ['`./venv/bin/python -m devautotools env_vars_from_json --uppercase_vars {secret_files}`'.format(secret_files=' '.join([str(s) for s in secret_json_files_paths]))]
+			env_python_path = '.\\venv\\Scripts\\python.exe' if os_name == 'nt' else './venv/bin/python'
+			inline_vars = ['`{env_python_path} -m devautotools env_with_vars_from_json {secret_files}`'.format(env_python_path=env_python_path, secret_files=' '.join([str(s) for s in secret_json_files_paths]))]
 		else:
 			inline_vars = []
 
@@ -480,7 +535,7 @@ class DjangoLinkedSite:
 			'',
 			'You can run this again with:',
 			'',
-			' '.join(['env DJANGO_DEBUG=true'] + inline_vars + ['./venv/bin/python ./test_site/manage.py runserver --settings=test_site.local_settings']),
+			' '.join(env_django_debug + inline_vars + ['./venv/bin/python ./test_site/manage.py runserver --settings=test_site.local_settings']),
 			'',
 		]
 
