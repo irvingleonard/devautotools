@@ -137,7 +137,14 @@ def django_settings_env_capture(**expected_sections):
 	:return:
 	:rtype:
 	"""
-
+	
+	known_variations = (
+		'_CONTENT',
+		'_content',
+		'_BASE64',
+		'_base64',
+	)
+	
 	required_expected_sections, optional_expected_sections = set(), set()
 	for expected_section in expected_sections:
 		if re_search(REQUIRED_SECTION_RE, expected_section) is None:
@@ -148,20 +155,38 @@ def django_settings_env_capture(**expected_sections):
 
 	for required_section in required_expected_sections:
 		for required_setting in expected_sections[required_section]:
-			required_setting_value = getenv(required_setting, '')
-			if len(required_setting_value):
-				environmental_settings[required_setting] = required_setting_value
+			required_setting_found = False
+			for known_variation in known_variations:
+				required_setting_variation = required_setting + known_variation
+				required_setting_value = getenv(required_setting_variation, '')
+				if len(required_setting_value):
+					environmental_settings[required_setting_variation] = required_setting_value
+					required_setting_found = True
 			else:
+				required_setting_value = getenv(required_setting, '')
+				if len(required_setting_value):
+					environmental_settings[required_setting] = required_setting_value
+					required_setting_found = True
+			if not required_setting_found:
 				missing_setting_from_env.append(required_setting)
 	if len(missing_setting_from_env):
 		raise RuntimeError(f'Missing required settings from env: {missing_setting_from_env}')
 
 	for optional_section in optional_expected_sections:
 		for optional_setting in expected_sections[optional_section]:
-			optional_setting_value = getenv(optional_setting, '')
-			if len(optional_setting_value):
-				environmental_settings[optional_setting] = optional_setting_value
+			optional_setting_found = False
+			for known_variation in known_variations:
+				optional_setting_variation = optional_setting + known_variation
+				optional_setting_value = getenv(optional_setting_variation, '')
+				if len(optional_setting_value):
+					environmental_settings[optional_setting_variation] = optional_setting_value
+					optional_setting_found = True
 			else:
+				optional_setting_value = getenv(optional_setting, '')
+				if len(optional_setting_value):
+					environmental_settings[optional_setting] = optional_setting_value
+					optional_setting_found = True
+			if not optional_setting_found:
 				missing_setting_from_env.append(optional_setting)
 	if len(missing_setting_from_env):
 		warn(f'Missing optional settings from env: {missing_setting_from_env}', RuntimeWarning)
